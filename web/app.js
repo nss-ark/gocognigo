@@ -1,4 +1,4 @@
-﻿// === GoCognigo â€” Client Application ===
+﻿// === GoCognigo \u2014 Client Application ===
 
 const API_BASE = '';
 
@@ -149,11 +149,23 @@ async function loadProjects() {
     renderSidebar();
 
     if (projects.length === 0) {
-        await createProject();
+        showEmptyState();
     } else {
+        hideEmptyState();
         const latest = projects[projects.length - 1];
         await activateProject(latest.id);
     }
+}
+
+function showEmptyState() {
+    document.getElementById('emptyState').classList.remove('hidden');
+    document.getElementById('uploadPhase').classList.add('hidden');
+    document.getElementById('processingPhase').classList.add('hidden');
+    document.getElementById('chatPhase').classList.add('hidden');
+}
+
+function hideEmptyState() {
+    document.getElementById('emptyState').classList.add('hidden');
 }
 
 async function createProject() {
@@ -172,6 +184,7 @@ async function createProject() {
         uploadedFiles = [];
         renderFileList();
         convHasBeenNamed = false;
+        hideEmptyState();
         showPhase('upload');
         loadStats();
     } catch (e) {
@@ -232,11 +245,18 @@ async function deleteProject(id) {
     if (!confirm('Delete this project and all its documents?')) return;
 
     try {
-        await fetch(`${API_BASE}/api/chats/delete`, {
+        const res = await fetch(`${API_BASE}/api/chats/delete`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: id })
         });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: 'Delete failed' }));
+            alert('Failed to delete project: ' + (err.error || 'Unknown error'));
+            return;
+        }
+
         projects = projects.filter(s => s.id !== id);
         renderSidebar();
 
@@ -244,14 +264,16 @@ async function deleteProject(id) {
             activeProjectId = null;
             activeConversationId = null;
             conversations = [];
+            uploadedFiles = [];
             if (projects.length > 0) {
                 await activateProject(projects[projects.length - 1].id);
             } else {
-                await createProject();
+                showEmptyState();
             }
         }
     } catch (e) {
         console.error('Failed to delete project', e);
+        alert('Failed to delete project: ' + e.message);
     }
 }
 
@@ -392,7 +414,7 @@ function renderSidebar() {
         const isActive = proj.id === activeProjectId;
         const date = new Date(proj.created_at);
         const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        const meta = proj.status === 'ready' ? `${proj.file_count} files â€¢ ${proj.chunk_count} chunks` :
+        const meta = proj.status === 'ready' ? `${proj.file_count} files \u2022 ${proj.chunk_count} chunks` :
             proj.status === 'processing' ? 'Processing...' :
                 `${proj.file_count || 0} files uploaded`;
 
@@ -407,7 +429,7 @@ function renderSidebar() {
                             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"></path>
                         </svg>
                         <span class="conv-name">${escapeHtml(c.name)}</span>
-                        ${conversations.length > 1 ? `<button class="conv-delete" onclick="event.stopPropagation(); deleteConversation('${c.id}')" title="Delete">Ã—</button>` : ''}
+                        ${conversations.length > 1 ? `<button class="conv-delete" onclick="event.stopPropagation(); deleteConversation('${c.id}')" title="Delete">\u00d7</button>` : ''}
                     </div>`;
             }).join('')}
                 <div class="conv-item conv-new" onclick="event.stopPropagation(); createNewConversation()">
@@ -430,7 +452,7 @@ function renderSidebar() {
                         </svg>
                         ${escapeHtml(proj.name)}
                     </div>
-                    <div class="chat-item-meta">${dateStr} â€¢ ${meta}</div>
+                    <div class="chat-item-meta">${dateStr} \u2022 ${meta}</div>
                 </div>
                 <div class="project-actions">
                     <button class="chat-item-rename" onclick="event.stopPropagation(); startRenameProject('${proj.id}')" title="Rename">
@@ -510,7 +532,7 @@ async function autoNameConversation(question) {
 
     let title = question.replace(/\n/g, ' ').trim();
     if (title.length > 40) {
-        title = title.substring(0, 40).replace(/\s+\S*$/, '') + 'â€¦';
+        title = title.substring(0, 40).replace(/\s+\S*$/, '') + '\u2026';
     }
     if (title.length < 3) return;
 
@@ -555,6 +577,7 @@ function renderIndexedFiles() {
 
 function showPhase(phase) {
     currentPhase = phase;
+    hideEmptyState();
     document.getElementById('uploadPhase').classList.toggle('hidden', phase !== 'upload');
     document.getElementById('processingPhase').classList.toggle('hidden', phase !== 'processing');
     document.getElementById('chatPhase').classList.toggle('hidden', phase !== 'chat');
@@ -608,9 +631,9 @@ async function handleFileDrop(fileList) {
                 continue;
             }
 
-            updateFileStatusUI(file.name, 'done', 'âœ“');
+            updateFileStatusUI(file.name, 'done', '\u2713');
         } catch (e) {
-            updateFileStatusUI(file.name, 'error', 'âœ— ' + e.message);
+            updateFileStatusUI(file.name, 'error', '\u2717 ' + e.message);
         }
     }
 
@@ -618,8 +641,8 @@ async function handleFileDrop(fileList) {
     await loadUploadedFiles();
     try {
         const chatsRes = await fetch(`${API_BASE}/api/chats`);
-        chatSessions = await chatsRes.json();
-        renderChatList();
+        projects = await chatsRes.json(); // Changed chatSessions to projects
+        renderSidebar(); // Changed renderChatList to renderSidebar
     } catch (e) { /* ignore */ }
 }
 
@@ -627,7 +650,7 @@ function addFileToListUI(name, size, status, counter) {
     const container = document.getElementById('fileList');
     const ext = name.toLowerCase().split('.').pop();
     const sizeStr = formatFileSize(size);
-    const statusText = status === 'uploading' ? `â¬† ${counter}` : status === 'error' ? 'âœ—' : 'âœ“';
+    const statusText = status === 'uploading' ? `\u2B06 ${counter}` : status === 'error' ? '\u2717' : '\u2713';
     const statusClass = status === 'uploading' ? 'uploading' : status === 'error' ? 'error' : '';
 
     const div = document.createElement('div');
@@ -638,6 +661,7 @@ function addFileToListUI(name, size, status, counter) {
         <span class="file-name">${escapeHtml(name)}</span>
         <span class="file-size">${sizeStr}</span>
         <span class="file-status ${statusClass}">${statusText}</span>
+        <button class="file-remove" onclick="removeFile('${escapeHtml(name)}')" title="Remove">\u00d7</button>
     `;
     container.appendChild(div);
 }
@@ -680,13 +704,44 @@ function renderFileList() {
     container.innerHTML = uploadedFiles.map(f => {
         const ext = f.name.toLowerCase().split('.').pop();
         const sizeStr = formatFileSize(f.size);
+        const safeName = escapeHtml(f.name).replace(/'/g, "\\'");
         return `<div class="file-item">
             <div class="file-icon ${ext}">${ext}</div>
             <span class="file-name">${escapeHtml(f.name)}</span>
             <span class="file-size">${sizeStr}</span>
-            <span class="file-status">âœ“</span>
+            <span class="file-status">\u2713</span>
+            <button class="file-remove" onclick="removeFile('${safeName}')" title="Remove">\u00d7</button>
         </div>`;
     }).join('');
+}
+
+async function removeFile(name) {
+    if (!activeProjectId) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/api/files/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: 'Delete failed' }));
+            alert('Failed to remove file: ' + (err.error || 'Unknown error'));
+            return;
+        }
+
+        // Refresh file list from server
+        await loadUploadedFiles();
+
+        // Refresh projects to update file count in sidebar
+        const projRes = await fetch(`${API_BASE}/api/chats`);
+        projects = await projRes.json();
+        renderSidebar();
+    } catch (e) {
+        console.error('Failed to remove file', e);
+        alert('Error removing file: ' + e.message);
+    }
 }
 
 // ===== Ingestion =====
