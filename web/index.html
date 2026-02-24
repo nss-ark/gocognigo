@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoCognigo — Document Intelligence</title>
+    <meta name="description"
+        content="High-performance document reasoning pipeline with upload-first architecture and multi-provider LLM support.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- Ambient background effects -->
+    <div class="ambient-bg">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+            </button>
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <defs>
+                            <linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32">
+                                <stop offset="0%" stop-color="#a855f7" />
+                                <stop offset="100%" stop-color="#06b6d4" />
+                            </linearGradient>
+                        </defs>
+                        <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z" stroke="url(#logoGrad)" stroke-width="2"
+                            fill="none" />
+                        <circle cx="16" cy="16" r="5" fill="url(#logoGrad)" opacity="0.8" />
+                        <path d="M16 6L16 12M16 20L16 26M6 11L12 14M20 18L26 21M6 21L12 18M20 14L26 11"
+                            stroke="url(#logoGrad)" stroke-width="1" opacity="0.4" />
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>GoCognigo</h1>
+                    <span class="logo-subtitle">Document Intelligence Engine</span>
+                </div>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="stats-bar" id="statsBar">
+                <div class="stat">
+                    <span class="stat-value" id="statDocs">—</span>
+                    <span class="stat-label">Documents</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat">
+                    <span class="stat-value" id="statChunks">—</span>
+                    <span class="stat-label">Chunks</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat">
+                    <span class="stat-value status-indicator" id="statStatus">
+                        <span class="pulse"></span> Loading
+                    </span>
+                    <span class="stat-label">Status</span>
+                </div>
+            </div>
+            <div class="settings-wrap">
+                <button class="settings-btn" id="settingsBtn" title="Settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path
+                            d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z">
+                        </path>
+                    </svg>
+                </button>
+                <div class="settings-dropdown hidden" id="settingsDropdown">
+                    <div class="settings-header">
+                        <h3>Settings</h3>
+                        <button class="settings-close" id="settingsClose">&times;</button>
+                    </div>
+
+                    <div class="settings-group">
+                        <label class="settings-label">Default LLM Provider</label>
+                        <select id="settingsLLM" class="settings-select">
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic</option>
+                            <option value="huggingface">HuggingFace</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-group">
+                        <label class="settings-label">Embedding Provider</label>
+                        <select id="settingsEmbed" class="settings-select">
+                            <option value="openai">OpenAI</option>
+                            <option value="huggingface">HuggingFace</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <div class="settings-group">
+                        <label class="settings-label">OpenAI API Key</label>
+                        <input type="password" id="settingsOpenAIKey" class="settings-input" placeholder="sk-..."
+                            autocomplete="off">
+                    </div>
+                    <div class="settings-group">
+                        <label class="settings-label">Anthropic API Key</label>
+                        <input type="password" id="settingsAnthropicKey" class="settings-input" placeholder="sk-ant-..."
+                            autocomplete="off">
+                    </div>
+                    <div class="settings-group">
+                        <label class="settings-label">HuggingFace API Key</label>
+                        <input type="password" id="settingsHFKey" class="settings-input" placeholder="hf_..."
+                            autocomplete="off">
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <div class="settings-group">
+                        <label class="settings-label">OCR Provider <span class="settings-hint-inline"
+                                id="tesseractStatus"></span></label>
+                        <select id="settingsOCR" class="settings-select">
+                            <option value="">None (no OCR)</option>
+                            <option value="tesseract">Tesseract (local, free)</option>
+                            <option value="sarvam">Sarvam Vision (cloud API)</option>
+                        </select>
+                    </div>
+                    <div class="settings-group" id="sarvamKeyGroup" style="display:none">
+                        <label class="settings-label">Sarvam API Key</label>
+                        <input type="password" id="settingsSarvamKey" class="settings-input" placeholder="sarvam_..."
+                            autocomplete="off">
+                    </div>
+
+                    <button class="settings-save-btn" id="settingsSaveBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Save Settings
+                    </button>
+                    <p class="settings-hint" id="settingsHint"></p>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- App layout: sidebar + main content -->
+    <div class="app-layout">
+
+        <!-- Sidebar: Chat History -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title">Projects</span>
+                <button class="new-chat-btn" id="newChatBtn" title="New Project">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    New Project
+                </button>
+            </div>
+            <div class="sidebar-list" id="chatList">
+                <!-- Chat sessions rendered by JS -->
+            </div>
+        </aside>
+
+        <!-- Main content -->
+        <main class="main">
+
+            <!-- ===== Empty State: No Projects ===== -->
+            <section class="phase hidden" id="emptyState">
+                <div class="empty-state-container">
+                    <div class="empty-state-icon">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="1.5" opacity="0.5">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="12" y1="18" x2="12" y2="12"></line>
+                            <polyline points="9 15 12 12 15 15"></polyline>
+                        </svg>
+                    </div>
+                    <h2 class="empty-state-title">Welcome to GoCognigo</h2>
+                    <p class="empty-state-desc">Create a project and upload documents to start asking questions with
+                        AI-powered reasoning.</p>
+                    <button class="process-btn" id="emptyStateCreateBtn" onclick="createProject()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Create Your First Project
+                    </button>
+                </div>
+            </section>
+
+            <!-- ===== Phase 1: Upload ===== -->
+            <section class="phase" id="uploadPhase">
+                <div class="phase-header">
+                    <h2 class="phase-title">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        Upload Documents
+                    </h2>
+                    <p class="phase-desc">Drag & drop PDF or DOCX files to begin</p>
+                </div>
+
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="1.5">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="12" y1="18" x2="12" y2="12"></line>
+                            <polyline points="9 15 12 12 15 15"></polyline>
+                        </svg>
+                    </div>
+                    <p class="upload-text">Drop files here or <label for="fileInput"
+                            class="upload-browse">browse</label></p>
+                    <p class="upload-hint">Supports PDF and DOCX • Max 100MB per file</p>
+                    <input type="file" id="fileInput" accept=".pdf,.docx" multiple hidden>
+                </div>
+
+                <div class="file-list" id="fileList">
+                    <!-- File items rendered by JS -->
+                </div>
+
+                <button class="process-btn hidden" id="processBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="13 17 18 12 13 7"></polyline>
+                        <polyline points="6 17 11 12 6 7"></polyline>
+                    </svg>
+                    Process Documents
+                </button>
+            </section>
+
+            <!-- ===== Phase 2: Processing ===== -->
+            <section class="phase hidden" id="processingPhase">
+                <div class="processing-card">
+                    <div class="processing-header">
+                        <div class="processing-spinner"></div>
+                        <h2 class="processing-title" id="processingTitle">Processing Documents...</h2>
+                    </div>
+                    <p class="processing-phase" id="processingPhaseLabel">Extracting text from documents</p>
+
+                    <div class="processing-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <div class="progress-stats">
+                            <span id="progressFiles">0 / 0 files</span>
+                            <span id="progressChunks">0 chunks</span>
+                        </div>
+                    </div>
+                    <button class="cancel-ingest-btn" id="cancelIngestBtn" onclick="cancelIngestion()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                        Cancel Processing
+                    </button>
+                </div>
+            </section>
+
+            <!-- ===== Phase 3: Chat ===== -->
+            <section class="phase hidden" id="chatPhase">
+
+                <!-- Collapsible indexed documents panel -->
+                <div class="indexed-files-panel" id="indexedFilesPanel">
+                    <button class="indexed-files-toggle" id="indexedFilesToggle">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        <span id="indexedFilesCount">0 Documents Indexed</span>
+                        <svg class="toggle-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div class="indexed-files-list hidden" id="indexedFilesList">
+                        <!-- Files rendered by JS -->
+                    </div>
+                </div>
+
+                <!-- Controls row: provider/model/mode -->
+                <div class="controls-row">
+                    <div class="provider-toggle">
+                        <label class="provider-label">LLM Provider</label>
+                        <div class="provider-buttons" id="providerButtons">
+                            <button class="provider-btn active" data-provider="openai" id="provOpenAI">
+                                <span class="provider-dot" style="background:#10a37f"></span>
+                                OpenAI
+                            </button>
+                            <button class="provider-btn" data-provider="huggingface" id="provHF">
+                                <span class="provider-dot" style="background:#ff9d00"></span>
+                                HuggingFace
+                            </button>
+                            <button class="provider-btn" data-provider="anthropic" id="provAnthropic">
+                                <span class="provider-dot" style="background:#d4a574"></span>
+                                Anthropic
+                            </button>
+                        </div>
+                    </div>
+                    <div class="model-selector-wrap">
+                        <label class="provider-label">Model</label>
+                        <select id="modelSelect" class="model-select">
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                    <div class="mode-selector">
+                        <button class="mode-btn active" data-mode="single" id="singleModeBtn">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <circle cx="11" cy="11" r="8" />
+                                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                            </svg>
+                            Single Query
+                        </button>
+                        <button class="mode-btn" data-mode="batch" id="batchModeBtn">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="3" y="3" width="7" height="7" />
+                                <rect x="14" y="3" width="7" height="7" />
+                                <rect x="3" y="14" width="7" height="7" />
+                                <rect x="14" y="14" width="7" height="7" />
+                            </svg>
+                            Batch Mode
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Chat action buttons -->
+                <div class="chat-actions">
+                    <button class="chat-action-btn" id="uploadMoreBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        Upload More
+                    </button>
+                    <button class="chat-action-btn danger" id="resetBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"></path>
+                        </svg>
+                        Reset
+                    </button>
+                </div>
+
+                <!-- Single query mode: conversation thread -->
+                <section class="panel query-panel" id="singlePanel">
+                    <!-- Scrollable conversation thread -->
+                    <div class="conversation-thread" id="conversationThread">
+                        <!-- Q&A messages rendered by JS -->
+                    </div>
+
+                    <!-- Loading indicator (inline in thread) -->
+                    <div class="loading hidden" id="loadingIndicator">
+                        <div class="spinner"></div>
+                        <span>Reasoning across the corpus...</span>
+                    </div>
+
+                    <!-- Input always at the bottom -->
+                    <div class="query-input-wrap">
+                        <textarea id="queryInput" placeholder="Ask a question about your documents..."
+                            rows="2"></textarea>
+                        <button class="submit-btn" id="submitBtn" onclick="submitQuery()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13" />
+                                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                            </svg>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Batch panel -->
+                <section class="panel batch-panel hidden" id="batchPanel">
+                    <div class="batch-controls">
+                        <button class="run-batch-btn" id="runBatchBtn" onclick="runBatch()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <polygon points="5 3 19 12 5 21 5 3" />
+                            </svg>
+                            Run All Questions
+                        </button>
+                        <div class="batch-timer" id="batchTimer">
+                            <span class="timer-value" id="timerValue">0.00s</span>
+                            <span class="timer-label">/ 30s budget</span>
+                            <div class="timer-bar">
+                                <div class="timer-fill" id="timerFill"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="batch-results hidden" id="batchResults"></div>
+                </section>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <span>Built with Go • Hybrid RAG • Multi-Provider LLM</span>
+        <span class="footer-accent">GoCognigo</span>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
