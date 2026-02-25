@@ -123,12 +123,14 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 	}
 
 	totalChunks := len(indexChunks)
+	log.Printf("Chunking complete: %d chunks from %d pages", totalChunks, len(docChunks))
 	if progress != nil {
 		progress(totalChunks, 0)
 	}
 
-	// Build batch jobs
-	batchSize := 20 // smaller batches for HuggingFace free tier
+	// Build batch jobs — larger batches for better throughput
+	// OpenAI supports up to 2048 inputs; HuggingFace free tier needs smaller batches
+	batchSize := 100
 	type batchJob struct {
 		start int
 		end   int
@@ -142,8 +144,8 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 		jobs = append(jobs, batchJob{start: i, end: end})
 	}
 
-	// Run embedding batches with concurrency limit (2 parallel for free-tier APIs)
-	concurrency := 2
+	// Run embedding batches with concurrency limit
+	concurrency := 4
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	var firstErr error
@@ -237,6 +239,7 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 			if progress != nil {
 				progress(totalChunks, doneCount)
 			}
+			log.Printf("Embedded %d / %d chunks", doneCount, totalChunks)
 			doneMu.Unlock()
 		}(job)
 	}

@@ -1,4 +1,4 @@
-﻿// === GoCognigo \u2014 Client Application ===
+// === GoCognigo \u2014 Client Application ===
 
 const API_BASE = '';
 
@@ -1176,7 +1176,7 @@ function appendAnswer(data) {
     answerDiv.innerHTML = `
         <div class="msg-answer-header">
             <span class="msg-answer-label">Answer</span>
-            <span class="msg-answer-time">${timeSec} â€¢ ${currentProvider} / ${modelLabel}</span>
+            <span class="msg-answer-time">${timeSec} \u2022 ${currentProvider} / ${modelLabel}</span>
         </div>
         <div class="msg-answer-text">${answerHtml}</div>
         ${footnotesHtml}
@@ -1195,10 +1195,10 @@ function appendAnswer(data) {
 }
 
 function getDefaultConfidenceReason(conf) {
-    if (conf >= 0.9) return 'Strong match â€” answer directly supported by multiple sources.';
-    if (conf >= 0.7) return 'Good match â€” answer supported by context with minor gaps.';
-    if (conf >= 0.5) return 'Moderate â€” partial information found, some inference required.';
-    if (conf > 0) return 'Low confidence â€” limited relevant context found.';
+    if (conf >= 0.9) return 'Strong match \u2014 answer directly supported by multiple sources.';
+    if (conf >= 0.7) return 'Good match \u2014 answer supported by context with minor gaps.';
+    if (conf >= 0.5) return 'Moderate \u2014 partial information found, some inference required.';
+    if (conf > 0) return 'Low confidence \u2014 limited relevant context found.';
     return 'No relevant information found in the indexed documents.';
 }
 
@@ -1303,7 +1303,7 @@ function renderBatchResults(data) {
         if (!answer) {
             card.innerHTML = `
                 <div class="batch-question"><span class="batch-q-num">${i + 1}</span>${escapeHtml(TEST_QUESTIONS[i])}</div>
-                <div class="batch-answer" style="color:var(--danger)">Error â€” no answer returned</div>
+                <div class="batch-answer" style="color:var(--danger)">Error \u2014 no answer returned</div>
             `;
         } else {
             const conf = answer.confidence || 0;

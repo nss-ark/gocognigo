@@ -914,6 +914,17 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 
 	log.Printf("Extracted %d pages from %d files", len(allChunks), len(files))
 
+	// Guard: if no text was extracted from any file, error out
+	if len(allChunks) == 0 {
+		log.Printf("No text extracted from any uploaded file")
+		s.ingestStatus.mu.Lock()
+		s.ingestStatus.Phase = "error"
+		s.ingestStatus.Error = "No text could be extracted from any uploaded file. If your PDFs are scanned images, configure an OCR provider in Settings (Tesseract or Sarvam Vision)."
+		s.ingestStatus.mu.Unlock()
+		_ = idx.Close()
+		return
+	}
+
 	// Check cancellation before starting embedding phase
 	if ctx.Err() != nil {
 		log.Printf("Ingestion cancelled before embedding phase")
