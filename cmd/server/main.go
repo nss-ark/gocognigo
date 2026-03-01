@@ -47,12 +47,21 @@ type Server struct {
 // IngestStatus is polled by the frontend to show progress.
 type IngestStatus struct {
 	mu          sync.RWMutex
-	Phase       string `json:"phase"` // idle, extracting, embedding, done, error
-	FilesTotal  int    `json:"files_total"`
-	FilesDone   int    `json:"files_done"`
-	ChunksTotal int    `json:"chunks_total"`
-	ChunksDone  int    `json:"chunks_done"`
-	Error       string `json:"error,omitempty"`
+	Phase       string       `json:"phase"` // idle, extracting, embedding, done, error
+	FilesTotal  int          `json:"files_total"`
+	FilesDone   int          `json:"files_done"`
+	ChunksTotal int          `json:"chunks_total"`
+	ChunksDone  int          `json:"chunks_done"`
+	Error       string       `json:"error,omitempty"`
+	FileResults []FileResult `json:"file_results,omitempty"`
+}
+
+// FileResult tracks per-file processing outcome.
+type FileResult struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // "ok" or "failed"
+	Error  string `json:"error,omitempty"`
+	Chunks int    `json:"chunks"`
 }
 
 func (s *IngestStatus) snapshot() IngestStatus {
@@ -65,6 +74,7 @@ func (s *IngestStatus) snapshot() IngestStatus {
 		ChunksTotal: s.ChunksTotal,
 		ChunksDone:  s.ChunksDone,
 		Error:       s.Error,
+		FileResults: s.FileResults,
 	}
 }
 
@@ -77,6 +87,7 @@ func (s *IngestStatus) reset() {
 	s.ChunksTotal = 0
 	s.ChunksDone = 0
 	s.Error = ""
+	s.FileResults = nil
 }
 
 // ----- Request / Response types -----
@@ -219,10 +230,43 @@ func main() {
 		}
 	}
 	tesseractOk := extractor.DetectTesseract()
-	if tesseractOk {
-		log.Printf("Tesseract OCR detected on PATH")
-	} else {
-		log.Printf("Tesseract OCR not found (install tesseract for scanned PDF support)")
+
+	// Smart OCR provider auto-detection when no explicit provider is set
+	if ocrProvider == "" {
+		if sarvamAPIKey != "" {
+			ocrProvider = "sarvam"
+			log.Printf("OCR: auto-selected Sarvam (API key configured)")
+		} else if tesseractOk {
+			ocrProvider = "tesseract"
+			log.Printf("OCR: auto-selected Tesseract (detected on system)")
+		}
+	}
+
+	// Log OCR capability summary
+	switch {
+	case ocrProvider == "sarvam" && sarvamAPIKey != "":
+		log.Printf("OCR ready: Sarvam Document Intelligence (primary), Tesseract=%v (fallback)", tesseractOk)
+	case ocrProvider == "tesseract" && tesseractOk:
+		hasPdftoppm := extractor.DetectPdftoppm()
+		if hasPdftoppm {
+			log.Printf("OCR ready: Tesseract + Poppler (primary), Sarvam=%v (fallback)", sarvamAPIKey != "")
+		} else {
+			log.Printf("OCR WARNING: Tesseract found but Poppler (pdftoppm) is missing — cannot convert PDFs to images")
+			log.Printf("  Install Poppler or switch to Sarvam OCR (set SARVAM_API_KEY in .env)")
+			if sarvamAPIKey != "" {
+				ocrProvider = "sarvam"
+				log.Printf("  Auto-switching to Sarvam since API key is available")
+			}
+		}
+	case ocrProvider == "tesseract" && !tesseractOk:
+		log.Printf("OCR WARNING: OCR_PROVIDER=tesseract but Tesseract not found")
+		if sarvamAPIKey != "" {
+			ocrProvider = "sarvam"
+			log.Printf("  Auto-switching to Sarvam since API key is available")
+		}
+	default:
+		log.Printf("OCR: no provider configured (scanned PDFs will not be processed)")
+		log.Printf("  Set SARVAM_API_KEY in .env for cloud OCR, or install Tesseract + Poppler for local OCR")
 	}
 
 	projects, err := chat.NewProjectStore("data/projects")
@@ -845,12 +889,6 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 			start := time.Now()
 			log.Printf("Extracting %s...", fname)
 
-			// 30-second timeout per file
-			type extractOut struct {
-				chunks []extractor.DocumentChunk
-				err    error
-			}
-			done := make(chan extractOut, 1)
 			// Build OCR config from server state
 			s.mu.RLock()
 			ocrCfg := &extractor.OCRConfig{
@@ -860,34 +898,25 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 			}
 			s.mu.RUnlock()
 
-			go func() {
-				var docChunks []extractor.DocumentChunk
-				var extractErr error
-				switch ext {
-				case ".pdf":
-					docChunks, extractErr = extractor.ExtractPDF(filePath, ocrCfg)
-				case ".docx":
-					docChunks, extractErr = extractor.ExtractDOCX(filePath)
-				}
-				done <- extractOut{docChunks, extractErr}
-			}()
+			// Run extraction directly — each OCR provider manages its own timeouts
+			// (Sarvam: 10-min poll, Tesseract: CPU-bound, naturally finishes).
+			// Only user cancellation (ctx) can interrupt.
+			var docChunks []extractor.DocumentChunk
+			var extractErr error
+			switch ext {
+			case ".pdf":
+				docChunks, extractErr = extractor.ExtractPDF(filePath, ocrCfg)
+			case ".docx":
+				docChunks, extractErr = extractor.ExtractDOCX(filePath)
+			}
 
-			select {
-			case out := <-done:
-				elapsed := time.Since(start)
-				if out.err != nil {
-					log.Printf("Failed to extract %s after %v: %v", fname, elapsed, out.err)
-					resultsCh <- extractResult{nil, out.err, fname}
-				} else {
-					log.Printf("Extracted %s: %d chunks in %v", fname, len(out.chunks), elapsed)
-					resultsCh <- extractResult{out.chunks, nil, fname}
-				}
-			case <-time.After(120 * time.Second): // longer timeout for OCR
-				log.Printf("Extraction timed out for %s after 30s, skipping", fname)
-				resultsCh <- extractResult{nil, fmt.Errorf("extraction timeout"), fname}
-			case <-ctx.Done():
-				log.Printf("Extraction cancelled for %s", fname)
-				resultsCh <- extractResult{nil, ctx.Err(), fname}
+			elapsed := time.Since(start)
+			if extractErr != nil {
+				log.Printf("Failed to extract %s after %v: %v", fname, elapsed, extractErr)
+				resultsCh <- extractResult{nil, extractErr, fname}
+			} else {
+				log.Printf("Extracted %s: %d chunks in %v", fname, len(docChunks), elapsed)
+				resultsCh <- extractResult{docChunks, nil, fname}
 			}
 
 			// Update progress atomically
@@ -906,11 +935,32 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 
 	// Collect results
 	var allChunks []extractor.DocumentChunk
+	var fileResults []FileResult
 	for res := range resultsCh {
 		if res.err == nil && res.chunks != nil {
 			allChunks = append(allChunks, res.chunks...)
+			fileResults = append(fileResults, FileResult{
+				Name:   res.file,
+				Status: "ok",
+				Chunks: len(res.chunks),
+			})
+		} else {
+			errMsg := "unknown error"
+			if res.err != nil {
+				errMsg = res.err.Error()
+			}
+			fileResults = append(fileResults, FileResult{
+				Name:   res.file,
+				Status: "failed",
+				Error:  errMsg,
+			})
 		}
 	}
+
+	// Store file results in ingest status
+	s.ingestStatus.mu.Lock()
+	s.ingestStatus.FileResults = fileResults
+	s.ingestStatus.mu.Unlock()
 
 	log.Printf("Extracted %d pages from %d files", len(allChunks), len(files))
 
@@ -934,6 +984,32 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		s.ingestStatus.mu.Unlock()
 		_ = idx.Close()
 		return
+	}
+
+	// Phase 1.5: Generate document summaries (L0 layer)
+	// Group pages by document for summary generation
+	docPages := make(map[string][]string)
+	for _, chunk := range allChunks {
+		docPages[chunk.Document] = append(docPages[chunk.Document], chunk.Text)
+	}
+
+	s.mu.RLock()
+	openAIKey := s.providerKeys["openai"]
+	s.mu.RUnlock()
+
+	if openAIKey != "" {
+		log.Printf("Generating document summaries for %d documents...", len(docPages))
+		for docName, pages := range docPages {
+			summary, err := llm.GenerateDocSummary(ctx, openAIKey, docName, pages, len(pages))
+			if err != nil {
+				log.Printf("Warning: failed to generate summary for %s: %v", docName, err)
+				continue
+			}
+			idx.DocSummaries = append(idx.DocSummaries, *summary)
+			log.Printf("Generated summary for %s: %s (%s), %d sections", docName, summary.Title, summary.DocType, len(summary.Sections))
+		}
+	} else {
+		log.Printf("Skipping document summary generation (no OpenAI API key)")
 	}
 
 	// Phase 2: Chunk + embed (with live progress reporting)
@@ -1191,13 +1267,13 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
 
-	results, err := ret.Search(ctx, req.Question, 15)
+	results, err := ret.Search(ctx, req.Question, 20)
 	if err != nil {
 		jsonErr(w, fmt.Sprintf("Retrieval error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	answer, err := llmClient.AnswerQuestion(ctx, req.Question, results)
+	answer, err := llmClient.AnswerQuestion(ctx, req.Question, results, ret.DocSummaries)
 	if err != nil {
 		jsonErr(w, fmt.Sprintf("LLM error: %v", err), http.StatusInternalServerError)
 		return
@@ -1283,14 +1359,14 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(idx int, question string) {
 			defer wg.Done()
-			results, err := ret.Search(ctx, question, 15)
+			results, err := ret.Search(ctx, question, 20)
 			if err != nil {
 				mu.Lock()
 				errors = append(errors, fmt.Sprintf("Q%d retrieval: %v", idx, err))
 				mu.Unlock()
 				return
 			}
-			answer, err := llmClient.AnswerQuestion(ctx, question, results)
+			answer, err := llmClient.AnswerQuestion(ctx, question, results, ret.DocSummaries)
 			if err != nil {
 				mu.Lock()
 				errors = append(errors, fmt.Sprintf("Q%d LLM: %v", idx, err))

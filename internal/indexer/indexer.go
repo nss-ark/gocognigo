@@ -19,12 +19,32 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// Chunk represents a piece of text to be embedded and indexed
+// Section represents a named section within a document.
+type Section struct {
+	Name      string `json:"name"`
+	PageStart int    `json:"page_start"`
+	PageEnd   int    `json:"page_end"`
+}
+
+// DocumentSummary is the L0 document-level metadata (LLM-generated at ingest).
+type DocumentSummary struct {
+	Document    string    `json:"document"`
+	Title       string    `json:"title"`
+	DocType     string    `json:"type"`
+	Summary     string    `json:"summary"`
+	Sections    []Section `json:"sections"`
+	KeyEntities []string  `json:"key_entities"`
+}
+
+// Chunk represents a piece of text to be embedded and indexed.
+// Text is a small search chunk (~150 words); ParentText is the full page for LLM context.
 type Chunk struct {
 	ID         string    `json:"id"`
 	Document   string    `json:"document"`
 	PageNumber int       `json:"page_number"`
-	Text       string    `json:"text"`
+	Text       string    `json:"text"`        // small search chunk
+	ParentText string    `json:"parent_text"` // full page text (sent to LLM)
+	Section    string    `json:"section"`     // section name from doc summary
 	Embedding  []float32 `json:"embedding"`
 }
 
@@ -37,10 +57,11 @@ type EmbeddingProvider interface {
 type ProgressFunc func(total, done int)
 
 type Index struct {
-	Chunks    []Chunk
-	BM25Index bleve.Index
-	Embedder  EmbeddingProvider
-	mu        sync.Mutex // protects Chunks during concurrent writes
+	Chunks       []Chunk
+	DocSummaries []DocumentSummary
+	BM25Index    bleve.Index
+	Embedder     EmbeddingProvider
+	mu           sync.Mutex // protects Chunks during concurrent writes
 }
 
 func NewIndex(providerName, apiKey, modelName, bm25Path string) (*Index, error) {
@@ -94,11 +115,16 @@ func (idx *Index) AddDocument(ctx context.Context, docChunks []extractor.Documen
 func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extractor.DocumentChunk, progress ProgressFunc) error {
 	var indexChunks []Chunk
 
-	// Chunking logic (simple word count based chunking)
+	// Build section lookup from document summaries
+	sectionMap := idx.buildSectionMap()
+
+	// Chunking: small 150-word search chunks linked to full-page parent text
 	for _, page := range docChunks {
+		parentText := page.Text // full page = parent chunk (L1)
+		section := sectionMap.lookup(page.Document, page.PageNumber)
 		words := strings.Fields(page.Text)
-		chunkSize := 300
-		overlap := 50
+		chunkSize := 150
+		overlap := 30
 
 		for i := 0; i < len(words); i += (chunkSize - overlap) {
 			end := i + chunkSize
@@ -114,6 +140,8 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 				Document:   page.Document,
 				PageNumber: page.PageNumber,
 				Text:       textChunk,
+				ParentText: parentText,
+				Section:    section,
 			})
 
 			if end == len(words) {
@@ -253,9 +281,42 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 	return nil
 }
 
+// sectionLookup maps document+page to section names.
+type sectionLookup struct {
+	summaries []DocumentSummary
+}
+
+func (idx *Index) buildSectionMap() sectionLookup {
+	return sectionLookup{summaries: idx.DocSummaries}
+}
+
+func (sl sectionLookup) lookup(doc string, page int) string {
+	for _, s := range sl.summaries {
+		if s.Document != doc {
+			continue
+		}
+		for _, sec := range s.Sections {
+			if page >= sec.PageStart && page <= sec.PageEnd {
+				return sec.Name
+			}
+		}
+	}
+	return ""
+}
+
+// vectorStore wraps chunks and summaries for serialization.
+type vectorStore struct {
+	Chunks       []Chunk           `json:"chunks"`
+	DocSummaries []DocumentSummary `json:"doc_summaries,omitempty"`
+}
+
 // Save Vector index to disk (since BM25 is already on disk via Bleve)
 func (idx *Index) SaveVectors(path string) error {
-	data, err := json.Marshal(idx.Chunks)
+	store := vectorStore{
+		Chunks:       idx.Chunks,
+		DocSummaries: idx.DocSummaries,
+	}
+	data, err := json.Marshal(store)
 	if err != nil {
 		return err
 	}
@@ -268,6 +329,14 @@ func (idx *Index) LoadVectors(path string) error {
 	if err != nil {
 		return err
 	}
+	// Try new format (with summaries) first
+	var store vectorStore
+	if err := json.Unmarshal(data, &store); err == nil && len(store.Chunks) > 0 {
+		idx.Chunks = store.Chunks
+		idx.DocSummaries = store.DocSummaries
+		return nil
+	}
+	// Fallback: legacy format (just chunks array)
 	return json.Unmarshal(data, &idx.Chunks)
 }
 

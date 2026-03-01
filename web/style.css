@@ -2051,6 +2051,109 @@ body {
     cursor: not-allowed;
 }
 
+/* === Ingestion Results Summary === */
+.ingest-results {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    animation: fadeIn 0.4s ease;
+}
+
+.ingest-results-header h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin: 0 0 0.3rem;
+}
+
+.ingest-results-summary {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin: 0 0 1rem;
+}
+
+.ingest-results-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 1.2rem;
+    padding-right: 0.25rem;
+}
+
+.ingest-results-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.ingest-results-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+}
+
+.ingest-result-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 0.8rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    animation: fadeIn 0.3s ease;
+    animation-fill-mode: backwards;
+}
+
+.ingest-result-item.result-ok {
+    border-left: 3px solid var(--success);
+}
+
+.ingest-result-item.result-fail {
+    border-left: 3px solid var(--danger);
+    background: rgba(239, 68, 68, 0.04);
+}
+
+.result-icon {
+    font-size: 0.9rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    width: 18px;
+    text-align: center;
+}
+
+.result-ok .result-icon {
+    color: var(--success);
+}
+
+.result-fail .result-icon {
+    color: var(--danger);
+}
+
+.result-name {
+    flex: 1;
+    color: var(--text-primary);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.result-detail {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.result-fail .result-detail {
+    color: var(--danger);
+    opacity: 0.85;
+}
+
 /* === Responsive === */
 @media (max-width: 900px) {
     .sidebar-toggle {

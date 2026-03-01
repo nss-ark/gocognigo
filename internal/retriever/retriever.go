@@ -16,27 +16,33 @@ type Result struct {
 	ChunkID    string  `json:"chunk_id"`
 	Document   string  `json:"document"`
 	PageNumber int     `json:"page_number"`
-	Text       string  `json:"text"`
+	Text       string  `json:"text"`        // small search chunk text
+	ParentText string  `json:"parent_text"` // full page text for LLM context
+	Section    string  `json:"section"`     // section name from document summary
 	Score      float64 `json:"score"`
 }
 
 // Retriever performs hybrid search over vector and BM25 indexes
 type Retriever struct {
-	Chunks    []indexer.Chunk
-	BM25Index bleve.Index
-	Embedder  indexer.EmbeddingProvider
+	Chunks       []indexer.Chunk
+	DocSummaries []indexer.DocumentSummary
+	BM25Index    bleve.Index
+	Embedder     indexer.EmbeddingProvider
 }
 
 // NewRetriever creates a Retriever from a pre-built Index
 func NewRetriever(idx *indexer.Index) *Retriever {
 	return &Retriever{
-		Chunks:    idx.Chunks,
-		BM25Index: idx.BM25Index,
-		Embedder:  idx.Embedder,
+		Chunks:       idx.Chunks,
+		DocSummaries: idx.DocSummaries,
+		BM25Index:    idx.BM25Index,
+		Embedder:     idx.Embedder,
 	}
 }
 
-// Search performs hybrid retrieval: vector similarity + BM25, merged via Reciprocal Rank Fusion
+// Search performs hybrid retrieval: vector similarity + BM25, merged via Reciprocal Rank Fusion.
+// Results are deduplicated by parent page — if multiple small chunks from the same page match,
+// only the highest-scored one is kept (but the full parent page text is returned for LLM context).
 func (r *Retriever) Search(ctx context.Context, query string, topK int) ([]Result, error) {
 	// 1. Embed the query
 	resp, err := r.Embedder.Embed(ctx, []string{query})
@@ -112,26 +118,36 @@ func (r *Retriever) Search(ctx context.Context, query string, topK int) ([]Resul
 		return fused[i].score > fused[j].score
 	})
 
-	// 6. Build result list
+	// 6. Build result list with parent-page deduplication
 	chunkMap := make(map[string]indexer.Chunk)
 	for _, c := range r.Chunks {
 		chunkMap[c.ID] = c
 	}
 
+	// Deduplicate: keep only the best-scoring chunk per parent page (doc+page)
+	seen := make(map[string]bool) // "document_pageN" → already included
 	var results []Result
-	for i, f := range fused {
-		if i >= topK {
+	for _, f := range fused {
+		if len(results) >= topK {
 			break
 		}
 		chunk, ok := chunkMap[f.id]
 		if !ok {
 			continue
 		}
+		parentKey := fmt.Sprintf("%s_p%d", chunk.Document, chunk.PageNumber)
+		if seen[parentKey] {
+			continue // already have a chunk from this page
+		}
+		seen[parentKey] = true
+
 		results = append(results, Result{
 			ChunkID:    chunk.ID,
 			Document:   chunk.Document,
 			PageNumber: chunk.PageNumber,
 			Text:       chunk.Text,
+			ParentText: chunk.ParentText,
+			Section:    chunk.Section,
 			Score:      f.score,
 		})
 	}

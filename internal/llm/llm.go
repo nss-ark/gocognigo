@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"gocognigo/internal/indexer"
 	"gocognigo/internal/retriever"
 
 	"github.com/sashabaranov/go-openai"
@@ -35,7 +36,7 @@ type Answer struct {
 
 // Provider defines the interface for different LLM backends
 type Provider interface {
-	AnswerQuestion(ctx context.Context, question string, results []retriever.Result) (*Answer, error)
+	AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary) (*Answer, error)
 }
 
 // NewProvider creates the appropriate LLM provider based on config
@@ -62,16 +63,48 @@ func NewProvider(providerName, apiKey, model string) (Provider, error) {
 	}
 }
 
-// FormatContext builds the context string for prompts
-func FormatContext(results []retriever.Result) string {
-	var contextParts []string
-	for i, r := range results {
-		contextParts = append(contextParts, fmt.Sprintf(
-			"[Source %d] Document: %s | Page: %d\n%s",
-			i+1, r.Document, r.PageNumber, r.Text,
-		))
+// FormatContext builds the context string for prompts.
+// Uses ParentText (full page) when available for richer LLM context.
+func FormatContext(results []retriever.Result, summaries []indexer.DocumentSummary) string {
+	var parts []string
+
+	// Prepend ALL document summaries so the LLM has a complete corpus view
+	// (critical for enumeration queries like "how many X are there?")
+	if len(summaries) > 0 {
+		var docSummaryParts []string
+		for _, s := range summaries {
+			entry := fmt.Sprintf("📄 %s (%s)\nType: %s\nSummary: %s", s.Document, s.Title, s.DocType, s.Summary)
+			if len(s.Sections) > 0 {
+				var secNames []string
+				for _, sec := range s.Sections {
+					secNames = append(secNames, fmt.Sprintf("%s (pp.%d-%d)", sec.Name, sec.PageStart, sec.PageEnd))
+				}
+				entry += "\nSections: " + strings.Join(secNames, "; ")
+			}
+			if len(s.KeyEntities) > 0 {
+				entry += "\nKey Entities: " + strings.Join(s.KeyEntities, ", ")
+			}
+			docSummaryParts = append(docSummaryParts, entry)
+		}
+		if len(docSummaryParts) > 0 {
+			parts = append(parts, "=== DOCUMENT OVERVIEWS ===\n\n"+strings.Join(docSummaryParts, "\n\n"))
+		}
 	}
-	return strings.Join(contextParts, "\n\n---\n\n")
+
+	// Add retrieved chunks (using parent text for full context)
+	parts = append(parts, "\n=== RETRIEVED EXCERPTS ===")
+	for i, r := range results {
+		text := r.ParentText
+		if text == "" {
+			text = r.Text // fallback for legacy chunks without parent
+		}
+		header := fmt.Sprintf("[Source %d] Document: %s | Page: %d", i+1, r.Document, r.PageNumber)
+		if r.Section != "" {
+			header += " | Section: " + r.Section
+		}
+		parts = append(parts, fmt.Sprintf("%s\n%s", header, text))
+	}
+	return strings.Join(parts, "\n\n---\n\n")
 }
 
 var baseSystemPrompt = `You are a precise document analysis assistant. You will be given a question and relevant excerpts from a corpus of legal, financial, and regulatory documents.
@@ -98,6 +131,9 @@ Rules:
 - confidence is 0.0 to 1.0 based on how well the context answers the question
 - confidence_reason is a brief explanation (1 sentence) of why the score is what it is
 - If the answer cannot be found in the context, set confidence = 0.0
+- For questions asking to LIST, COUNT, or NAME items: exhaustively scan EVERY source excerpt provided. Do not stop early — check ALL provided sources even if you already found some matches. Count carefully and verify the total.
+- Use exact figures, labels, and terminology from the source documents. Prefer the specific wording in the document (e.g. if a document says "Rs. 4,586,550,000" use that exact figure, not a converted or rounded version)
+- When multiple documents are relevant, cross-reference ALL of them before forming your answer. A source may contain relevant information even if its title does not obviously match the question
 
 Also keep the legacy fields for backward compatibility:
 - "documents": array of all cited document names
@@ -111,8 +147,8 @@ type OpenAIProvider struct {
 	model  string
 }
 
-func (p *OpenAIProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result) (*Answer, error) {
-	contextStr := FormatContext(results)
+func (p *OpenAIProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary) (*Answer, error) {
+	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("**Question:** %s\n\n**Context:**\n\n%s", question, contextStr)
 
 	resp, err := p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
@@ -143,8 +179,8 @@ type HuggingFaceProvider struct {
 	model  string
 }
 
-func (p *HuggingFaceProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result) (*Answer, error) {
-	contextStr := FormatContext(results)
+func (p *HuggingFaceProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary) (*Answer, error) {
+	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("Question: %s\n\nContext:\n%s", question, contextStr)
 
 	reqBody, _ := json.Marshal(map[string]interface{}{
@@ -153,7 +189,7 @@ func (p *HuggingFaceProvider) AnswerQuestion(ctx context.Context, question strin
 			{"role": "system", "content": baseSystemPrompt},
 			{"role": "user", "content": userPrompt},
 		},
-		"max_tokens":  1024,
+		"max_tokens":  2048,
 		"temperature": 0.1,
 		"stream":      false,
 	})
@@ -201,13 +237,13 @@ type AnthropicProvider struct {
 	model  string
 }
 
-func (p *AnthropicProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result) (*Answer, error) {
-	contextStr := FormatContext(results)
+func (p *AnthropicProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary) (*Answer, error) {
+	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("Question: %s\n\nContext:\n%s", question, contextStr)
 
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"model":       p.model,
-		"max_tokens":  1024,
+		"max_tokens":  2048,
 		"temperature": 0.1,
 		"system":      baseSystemPrompt,
 		"messages": []map[string]string{
@@ -301,5 +337,108 @@ func parseAnswer(rawText string, question string) (*Answer, error) {
 		Footnotes:        parsed.Footnotes,
 		Confidence:       parsed.Confidence,
 		ConfidenceReason: parsed.ConfidenceReason,
+	}, nil
+}
+
+// GenerateDocSummary uses a cheap LLM call to produce a structured document summary.
+// It reads the first maxPages of extracted text and returns a DocumentSummary.
+func GenerateDocSummary(ctx context.Context, apiKey string, docName string, pages []string, totalPages int) (*indexer.DocumentSummary, error) {
+	if apiKey == "" {
+		return nil, fmt.Errorf("OpenAI API key required for summary generation")
+	}
+
+	// Sample first 5 pages (or all if fewer)
+	maxPages := 5
+	if len(pages) < maxPages {
+		maxPages = len(pages)
+	}
+	sampleText := strings.Join(pages[:maxPages], "\n\n--- PAGE BREAK ---\n\n")
+
+	// Truncate to ~4000 words to stay within cheap model limits
+	words := strings.Fields(sampleText)
+	if len(words) > 4000 {
+		sampleText = strings.Join(words[:4000], " ")
+	}
+
+	prompt := fmt.Sprintf(`Analyze this document and produce a structured summary as JSON.
+
+Document name: %s
+Total pages: %d
+
+First %d pages of text:
+---
+%s
+---
+
+Return ONLY valid JSON in this exact format:
+{
+  "title": "Full document title or case name",
+  "type": "legal_case|financial_report|regulatory_filing|contract|transcript|other",
+  "summary": "2-3 sentence summary of the document's content and purpose",
+  "sections": [
+    {"name": "Section Name", "page_start": 1, "page_end": 10}
+  ],
+  "key_entities": ["entity1", "entity2"]
+}
+
+For sections, estimate page ranges based on the content and total page count (%d pages).
+If you cannot determine sections, return an empty array.`, docName, totalPages, maxPages, sampleText, totalPages)
+
+	client := openai.NewClient(apiKey)
+	resp, err := client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: "gpt-4o-mini",
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleUser, Content: prompt},
+		},
+		Temperature:    0.1,
+		ResponseFormat: &openai.ChatCompletionResponseFormat{Type: openai.ChatCompletionResponseFormatTypeJSONObject},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("summary LLM call failed: %w", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("empty response from summary LLM")
+	}
+
+	rawJSON := resp.Choices[0].Message.Content
+	rawJSON = strings.TrimPrefix(rawJSON, "```json\n")
+	rawJSON = strings.TrimPrefix(rawJSON, "```\n")
+	rawJSON = strings.Split(rawJSON, "```")[0]
+	rawJSON = strings.TrimSpace(rawJSON)
+
+	var summary struct {
+		Title    string `json:"title"`
+		DocType  string `json:"type"`
+		Summary  string `json:"summary"`
+		Sections []struct {
+			Name      string `json:"name"`
+			PageStart int    `json:"page_start"`
+			PageEnd   int    `json:"page_end"`
+		} `json:"sections"`
+		KeyEntities []string `json:"key_entities"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &summary); err != nil {
+		log.Printf("Failed to parse doc summary JSON for %s: %v (raw: %.200s)", docName, err, rawJSON)
+		return nil, fmt.Errorf("parse summary: %w", err)
+	}
+
+	// Convert to indexer types
+	var sections []indexer.Section
+	for _, s := range summary.Sections {
+		sections = append(sections, indexer.Section{
+			Name:      s.Name,
+			PageStart: s.PageStart,
+			PageEnd:   s.PageEnd,
+		})
+	}
+
+	return &indexer.DocumentSummary{
+		Document:    docName,
+		Title:       summary.Title,
+		DocType:     summary.DocType,
+		Summary:     summary.Summary,
+		Sections:    sections,
+		KeyEntities: summary.KeyEntities,
 	}, nil
 }

@@ -789,11 +789,8 @@ function startIngestPolling() {
                 renderSidebar();
                 loadStats();
 
-                // Load conversations (auto-creates first one if needed)
-                setTimeout(async () => {
-                    showPhase('chat');
-                    await loadConversations();
-                }, 800);
+                // Show per-file results summary instead of auto-transitioning
+                showIngestResults(status);
             } else if (status.phase === 'error') {
                 clearInterval(ingestPollInterval);
                 ingestPollInterval = null;
@@ -882,6 +879,68 @@ async function cancelIngestion() {
 
     btn.disabled = false;
     btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg> Cancel Processing`;
+}
+
+// Show per-file results when ingestion completes
+function showIngestResults(status) {
+    const results = status.file_results || [];
+    const succeeded = results.filter(f => f.status === 'ok');
+    const failed = results.filter(f => f.status === 'failed');
+    const totalChunks = succeeded.reduce((sum, f) => sum + (f.chunks || 0), 0);
+
+    // Hide spinner & cancel, show results
+    document.querySelector('.processing-spinner').style.display = 'none';
+    document.getElementById('cancelIngestBtn').classList.add('hidden');
+    document.getElementById('ingestResults').classList.remove('hidden');
+
+    // Update title
+    const title = document.getElementById('ingestResultsTitle');
+    if (failed.length === 0) {
+        title.textContent = '✓ All Files Processed Successfully';
+        title.style.color = 'var(--success)';
+    } else if (succeeded.length === 0) {
+        title.textContent = '✗ Processing Failed';
+        title.style.color = 'var(--danger)';
+    } else {
+        title.textContent = `⚠ Processed ${succeeded.length} of ${results.length} Files`;
+        title.style.color = 'var(--warning)';
+    }
+
+    // Summary line
+    document.getElementById('ingestResultsSummary').textContent =
+        `${succeeded.length} succeeded · ${failed.length} failed · ${totalChunks.toLocaleString()} chunks extracted`;
+
+    // Build file results list
+    const listEl = document.getElementById('ingestResultsList');
+    listEl.innerHTML = results.map(f => {
+        const isOk = f.status === 'ok';
+        const ext = f.name.toLowerCase().split('.').pop();
+        const icon = isOk ? '✓' : '✗';
+        const statusClass = isOk ? 'result-ok' : 'result-fail';
+        const detail = isOk
+            ? `${f.chunks} chunk${f.chunks !== 1 ? 's' : ''}`
+            : escapeHtml(f.error || 'Unknown error');
+        return `<div class="ingest-result-item ${statusClass}">
+            <span class="result-icon">${icon}</span>
+            <span class="file-ext ${ext}">${ext}</span>
+            <span class="result-name">${escapeHtml(f.name)}</span>
+            <span class="result-detail">${detail}</span>
+        </div>`;
+    }).join('');
+
+    // Hide continue button if no files succeeded
+    document.getElementById('continueToChatBtn').classList.toggle('hidden', succeeded.length === 0);
+}
+
+// Transition from results summary to chat
+async function continueToChat() {
+    // Reset results UI for next time
+    document.querySelector('.processing-spinner').style.display = '';
+    document.getElementById('cancelIngestBtn').classList.remove('hidden');
+    document.getElementById('ingestResults').classList.add('hidden');
+
+    showPhase('chat');
+    await loadConversations();
 }
 
 // ===== Settings =====

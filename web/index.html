@@ -272,6 +272,24 @@
                         </svg>
                         Cancel Processing
                     </button>
+
+                    <!-- Results summary (shown when done) -->
+                    <div class="ingest-results hidden" id="ingestResults">
+                        <div class="ingest-results-header">
+                            <h3 id="ingestResultsTitle">Processing Complete</h3>
+                            <p class="ingest-results-summary" id="ingestResultsSummary"></p>
+                        </div>
+                        <div class="ingest-results-list" id="ingestResultsList">
+                            <!-- File results rendered by JS -->
+                        </div>
+                        <button class="process-btn" id="continueToChatBtn" onclick="continueToChat()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"></path>
+                            </svg>
+                            Continue to Chat
+                        </button>
+                    </div>
                 </div>
             </section>
 
