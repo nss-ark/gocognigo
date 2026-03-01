@@ -79,6 +79,17 @@ function appendAnswer(data) {
         }));
     }
 
+    // Deduplicate footnotes by document+page to avoid repeated sources
+    if (footnotes.length > 0) {
+        const seen = new Set();
+        footnotes = footnotes.filter(fn => {
+            const key = `${fn.document}:${fn.page}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
     if (footnotes.length > 0) {
         footnotesHtml = `
             <div class="msg-footnotes">
@@ -278,16 +289,13 @@ async function loadSettings() {
     try {
         const res = await fetch(`${API_BASE}/api/settings`);
         const s = await res.json();
-        document.getElementById('settingsLLM').value = s.default_llm || 'openai';
-        document.getElementById('settingsEmbed').value = s.embed_provider || 'openai';
-        document.getElementById('settingsOpenAIKey').value = s.openai_key || '';
-        document.getElementById('settingsOpenAIKey').placeholder = s.openai_key ? s.openai_key : 'sk-...';
+        document.getElementById('settingsLLM').value = s.default_llm || 'anthropic';
+        document.getElementById('settingsEmbed').value = s.embed_provider || 'huggingface';
         document.getElementById('settingsAnthropicKey').value = s.anthropic_key || '';
         document.getElementById('settingsAnthropicKey').placeholder = s.anthropic_key ? s.anthropic_key : 'sk-ant-...';
         document.getElementById('settingsHFKey').value = s.huggingface_key || '';
         document.getElementById('settingsHFKey').placeholder = s.huggingface_key ? s.huggingface_key : 'hf_...';
         // Clear the actual value fields — only show masked placeholder
-        document.getElementById('settingsOpenAIKey').value = '';
         document.getElementById('settingsAnthropicKey').value = '';
         document.getElementById('settingsHFKey').value = '';
         // OCR settings
@@ -322,10 +330,8 @@ async function saveSettings() {
     };
 
     // Only send keys if user typed a new one (not empty)
-    const oaKey = document.getElementById('settingsOpenAIKey').value.trim();
     const antKey = document.getElementById('settingsAnthropicKey').value.trim();
     const hfKey = document.getElementById('settingsHFKey').value.trim();
-    if (oaKey) body.openai_key = oaKey;
     if (antKey) body.anthropic_key = antKey;
     if (hfKey) body.huggingface_key = hfKey;
     const sarvamKey = document.getElementById('settingsSarvamKey').value.trim();

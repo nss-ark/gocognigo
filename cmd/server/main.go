@@ -34,7 +34,7 @@ func main() {
 
 	defaultLLM := os.Getenv("LLM_PROVIDER")
 	if defaultLLM == "" {
-		defaultLLM = "openai"
+		defaultLLM = "anthropic"
 	}
 
 	// Override with saved settings if they exist
@@ -78,13 +78,14 @@ func main() {
 	tesseractOk := extractor.DetectTesseract()
 
 	// Smart OCR provider auto-detection when no explicit provider is set
+	// Prefer Tesseract (free, local) over Sarvam (paid, cloud)
 	if ocrProvider == "" {
-		if sarvamAPIKey != "" {
-			ocrProvider = "sarvam"
-			log.Printf("OCR: auto-selected Sarvam (API key configured)")
-		} else if tesseractOk {
+		if tesseractOk {
 			ocrProvider = "tesseract"
 			log.Printf("OCR: auto-selected Tesseract (detected on system)")
+		} else if sarvamAPIKey != "" {
+			ocrProvider = "sarvam"
+			log.Printf("OCR: auto-selected Sarvam (API key configured, Tesseract not found)")
 		}
 	}
 

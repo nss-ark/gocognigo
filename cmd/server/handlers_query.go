@@ -241,19 +241,6 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 	allModels := map[string][]map[string]string{
-		"openai": {
-			{"id": "gpt-5.2", "name": "GPT-5.2 (Flagship)"},
-			{"id": "gpt-5.2-pro", "name": "GPT-5.2 Pro"},
-			{"id": "gpt-5-mini", "name": "GPT-5 Mini"},
-			{"id": "gpt-5-nano", "name": "GPT-5 Nano"},
-			{"id": "gpt-4.1", "name": "GPT-4.1"},
-			{"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini"},
-			{"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano"},
-			{"id": "gpt-4o", "name": "GPT-4o"},
-			{"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
-			{"id": "o3-mini", "name": "o3-mini"},
-			{"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo"},
-		},
 		"anthropic": {
 			{"id": "claude-opus-4-6", "name": "Claude Opus 4.6 (Latest)"},
 			{"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
@@ -265,10 +252,12 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			{"id": "claude-3-opus-20240229", "name": "Claude 3 Opus"},
 		},
 		"huggingface": {
-			{"id": "mistralai/Mistral-7B-Instruct-v0.3", "name": "Mistral 7B Instruct"},
-			{"id": "meta-llama/Meta-Llama-3-8B-Instruct", "name": "Llama 3 8B Instruct"},
-			{"id": "Qwen/Qwen2.5-72B-Instruct", "name": "Qwen 2.5 72B"},
-			{"id": "microsoft/Phi-3-mini-4k-instruct", "name": "Phi-3 Mini"},
+			{"id": "Qwen/Qwen2.5-72B-Instruct", "name": "Qwen 2.5 72B Instruct"},
+			{"id": "Qwen/Qwen3-8B", "name": "Qwen 3 8B"},
+			{"id": "Qwen/QwQ-32B", "name": "QwQ 32B (Reasoning)"},
+			{"id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct"},
+			{"id": "microsoft/phi-4", "name": "Phi-4 14B"},
+			{"id": "Qwen/Qwen2.5-Coder-32B-Instruct", "name": "Qwen 2.5 Coder 32B"},
 		},
 	}
 

@@ -53,7 +53,7 @@ func main() {
 
 		ext := strings.ToLower(filepath.Ext(file.Name()))
 		if ext == ".pdf" {
-			chunks, extractErr = extractor.ExtractPDF(path)
+			chunks, extractErr = extractor.ExtractPDF(path, nil)
 		} else if ext == ".docx" {
 			chunks, extractErr = extractor.ExtractDOCX(path)
 		} else {

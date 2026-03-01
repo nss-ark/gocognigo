@@ -25,7 +25,7 @@ let uploadedFiles = [];
 let convHasBeenNamed = false;
 
 let currentMode = 'single';
-let currentProvider = 'openai';
+let currentProvider = 'anthropic';
 let currentModel = '';
 let availableProviders = [];
 let providerModels = {};

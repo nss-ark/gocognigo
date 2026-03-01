@@ -51,7 +51,7 @@ func NewProvider(providerName, apiKey, model string) (Provider, error) {
 		return &OpenAIProvider{client: openai.NewClient(apiKey), model: model}, nil
 	case "huggingface":
 		if model == "" {
-			model = "mistralai/Mistral-7B-Instruct-v0.3"
+			model = "Qwen/Qwen2.5-7B-Instruct-1M"
 		}
 		return &HuggingFaceProvider{apiKey: apiKey, model: model}, nil
 	case "anthropic":
@@ -150,6 +150,14 @@ Also keep the legacy fields for backward compatibility:
 - "documents": array of all cited document names
 - "pages": array of corresponding page numbers`
 
+// isReasoningModel returns true for OpenAI o-series reasoning models
+// that do not support temperature, top_p, or response_format parameters.
+func isReasoningModel(model string) bool {
+	return strings.HasPrefix(model, "o1") ||
+		strings.HasPrefix(model, "o3") ||
+		strings.HasPrefix(model, "o4")
+}
+
 // ==========================================
 // OpenAI Provider
 // ==========================================
@@ -162,15 +170,33 @@ func (p *OpenAIProvider) AnswerQuestion(ctx context.Context, question string, re
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("**Question:** %s\n\n**Context:**\n\n%s", question, contextStr)
 
-	resp, err := p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model: p.model,
-		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem, Content: baseSystemPrompt},
-			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
-		},
-		Temperature:    0.1,
-		ResponseFormat: &openai.ChatCompletionResponseFormat{Type: openai.ChatCompletionResponseFormatTypeJSONObject},
-	})
+	var resp openai.ChatCompletionResponse
+	var err error
+
+	if isReasoningModel(p.model) {
+		// Reasoning models (o1, o3, o4 series) reject temperature, top_p,
+		// and response_format. Go's zero-value for float32 is 0 which the
+		// API interprets as an explicit value, so we must not set it at all.
+		// Also use MaxCompletionTokens instead of MaxTokens.
+		resp, err = p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+			Model: p.model,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: baseSystemPrompt},
+				{Role: openai.ChatMessageRoleUser, Content: userPrompt},
+			},
+			MaxCompletionTokens: 4096,
+		})
+	} else {
+		resp, err = p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+			Model: p.model,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: baseSystemPrompt},
+				{Role: openai.ChatMessageRoleUser, Content: userPrompt},
+			},
+			Temperature:    0.1,
+			ResponseFormat: &openai.ChatCompletionResponseFormat{Type: openai.ChatCompletionResponseFormatTypeJSONObject},
+		})
+	}
 	if err != nil {
 		return nil, fmt.Errorf("openai error: %w", err)
 	}
@@ -205,7 +231,7 @@ func (p *HuggingFaceProvider) AnswerQuestion(ctx context.Context, question strin
 		"stream":      false,
 	})
 
-	url := "https://router.huggingface.co/hf-inference/v1/chat/completions"
+	url := "https://router.huggingface.co/v1/chat/completions"
 	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	req.Header.Set("Content-Type", "application/json")

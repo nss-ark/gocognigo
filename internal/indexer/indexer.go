@@ -461,7 +461,7 @@ func (e *HuggingFaceEmbedder) Embed(ctx context.Context, texts []string) ([][]fl
 		"inputs": texts,
 	})
 
-	url := fmt.Sprintf("https://router.huggingface.co/hf-inference/models/%s", e.model)
+	url := fmt.Sprintf("https://router.huggingface.co/models/%s", e.model)
 	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
 	req.Header.Set("Authorization", "Bearer "+e.apiKey)
 	req.Header.Set("Content-Type", "application/json")

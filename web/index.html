@@ -91,7 +91,6 @@
                     <div class="settings-group">
                         <label class="settings-label">Default LLM Provider</label>
                         <select id="settingsLLM" class="settings-select">
-                            <option value="openai">OpenAI</option>
                             <option value="anthropic">Anthropic</option>
                             <option value="huggingface">HuggingFace</option>
                         </select>
@@ -100,18 +99,12 @@
                     <div class="settings-group">
                         <label class="settings-label">Embedding Provider</label>
                         <select id="settingsEmbed" class="settings-select">
-                            <option value="openai">OpenAI</option>
                             <option value="huggingface">HuggingFace</option>
                         </select>
                     </div>
 
                     <div class="settings-divider"></div>
 
-                    <div class="settings-group">
-                        <label class="settings-label">OpenAI API Key</label>
-                        <input type="password" id="settingsOpenAIKey" class="settings-input" placeholder="sk-..."
-                            autocomplete="off">
-                    </div>
                     <div class="settings-group">
                         <label class="settings-label">Anthropic API Key</label>
                         <input type="password" id="settingsAnthropicKey" class="settings-input" placeholder="sk-ant-..."
@@ -129,7 +122,7 @@
                         <label class="settings-label">OCR Provider <span class="settings-hint-inline"
                                 id="tesseractStatus"></span></label>
                         <select id="settingsOCR" class="settings-select">
-                            <option value="">None (no OCR)</option>
+                            <option value="">Auto-detect (Tesseract → Sarvam)</option>
                             <option value="tesseract">Tesseract (local, free)</option>
                             <option value="sarvam">Sarvam Vision (cloud API)</option>
                         </select>
@@ -320,17 +313,13 @@
                     <div class="provider-toggle">
                         <label class="provider-label">LLM Provider</label>
                         <div class="provider-buttons" id="providerButtons">
-                            <button class="provider-btn active" data-provider="openai" id="provOpenAI">
-                                <span class="provider-dot" style="background:#10a37f"></span>
-                                OpenAI
+                            <button class="provider-btn active" data-provider="anthropic" id="provAnthropic">
+                                <span class="provider-dot" style="background:#d4a574"></span>
+                                Anthropic
                             </button>
                             <button class="provider-btn" data-provider="huggingface" id="provHF">
                                 <span class="provider-dot" style="background:#ff9d00"></span>
                                 HuggingFace
-                            </button>
-                            <button class="provider-btn" data-provider="anthropic" id="provAnthropic">
-                                <span class="provider-dot" style="background:#d4a574"></span>
-                                Anthropic
                             </button>
                         </div>
                     </div>

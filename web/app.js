@@ -2,7 +2,10 @@
 // This file wires up DOM event listeners and starts the app.
 // All logic lives in the module files loaded before this one.
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Load stats first (sets currentProvider from server default_llm),
+    // then load provider models so dropdown matches the active provider.
+    await loadStats();
     loadProviders();
     renderBatchQuestions();
 
