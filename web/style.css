@@ -1516,6 +1516,91 @@ body {
     margin-bottom: 1rem;
 }
 
+/* Markdown-rendered content in answers */
+.msg-answer-text p,
+.batch-answer p {
+    margin: 0 0 0.6em 0;
+}
+
+.msg-answer-text p:last-child,
+.batch-answer p:last-child {
+    margin-bottom: 0;
+}
+
+.msg-answer-text ol,
+.msg-answer-text ul,
+.batch-answer ol,
+.batch-answer ul {
+    margin: 0.5em 0;
+    padding-left: 1.6em;
+}
+
+.msg-answer-text li,
+.batch-answer li {
+    margin-bottom: 0.35em;
+    line-height: 1.6;
+}
+
+.msg-answer-text strong,
+.batch-answer strong {
+    color: #e2e8f0;
+    font-weight: 600;
+}
+
+.msg-answer-text code,
+.batch-answer code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    color: var(--accent-cyan);
+}
+
+.msg-answer-text pre,
+.batch-answer pre {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 1rem;
+    margin: 0.6em 0;
+    overflow-x: auto;
+}
+
+.msg-answer-text pre code,
+.batch-answer pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.82rem;
+    color: var(--text-primary);
+}
+
+.msg-answer-text h2,
+.msg-answer-text h3,
+.msg-answer-text h4,
+.batch-answer h2,
+.batch-answer h3,
+.batch-answer h4 {
+    margin: 0.8em 0 0.4em 0;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.msg-answer-text h2,
+.batch-answer h2 {
+    font-size: 1.1em;
+}
+
+.msg-answer-text h3,
+.batch-answer h3 {
+    font-size: 1em;
+}
+
+.msg-answer-text h4,
+.batch-answer h4 {
+    font-size: 0.95em;
+}
+
 /* Inline footnote markers — subtle superscript style */
 .footnote-ref {
     display: inline;

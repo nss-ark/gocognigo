@@ -47,7 +47,7 @@ type Server struct {
 // IngestStatus is polled by the frontend to show progress.
 type IngestStatus struct {
 	mu          sync.RWMutex
-	Phase       string       `json:"phase"` // idle, extracting, embedding, done, error
+	Phase       string       `json:"phase"` // idle, processing, done, error, cancelled
 	FilesTotal  int          `json:"files_total"`
 	FilesDone   int          `json:"files_done"`
 	ChunksTotal int          `json:"chunks_total"`
@@ -432,13 +432,9 @@ func (s *Server) handleActivateProject(w http.ResponseWriter, r *http.Request) {
 	s.ingestStatus.reset()
 	s.mu.Unlock()
 
-	// If the project is ready, try to load its indexes
+	// If the project is ready, load indexes in background (non-blocking)
 	if sess.Status == "ready" {
-		if err := s.loadChatIndexes(sess.ID); err != nil {
-			log.Printf("Warning: could not load indexes for project %s: %v", sess.ID, err)
-		}
-
-		// Auto-create a conversation if none exist, and set as active
+		// Set up conversations immediately (fast, no disk I/O)
 		convs := s.projects.ListConversations(sess.ID)
 		if len(convs) == 0 {
 			conv, _ := s.projects.CreateConversation(sess.ID, "")
@@ -448,12 +444,18 @@ func (s *Server) handleActivateProject(w http.ResponseWriter, r *http.Request) {
 				s.mu.Unlock()
 			}
 		} else {
-			// Activate the most recent conversation
 			last := convs[len(convs)-1]
 			s.mu.Lock()
 			s.activeConversation = &last
 			s.mu.Unlock()
 		}
+
+		// Load indexes in background — doesn't block the response
+		go func(projectID string) {
+			if err := s.loadChatIndexes(projectID); err != nil {
+				log.Printf("Warning: could not load indexes for project %s: %v", projectID, err)
+			}
+		}(sess.ID)
 	}
 
 	jsonResp(w, sess)
@@ -770,7 +772,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	// Don't start if already running
 	snap := s.ingestStatus.snapshot()
-	if snap.Phase == "extracting" || snap.Phase == "embedding" {
+	if snap.Phase == "processing" {
 		jsonErr(w, "Ingestion already in progress", http.StatusConflict)
 		return
 	}
@@ -807,7 +809,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	// Reset ingest status
 	s.ingestStatus.mu.Lock()
-	s.ingestStatus.Phase = "extracting"
+	s.ingestStatus.Phase = "processing"
 	s.ingestStatus.FilesTotal = len(uploadedFiles)
 	s.ingestStatus.FilesDone = 0
 	s.ingestStatus.ChunksTotal = 0
@@ -857,31 +859,41 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		return
 	}
 
-	// Phase 1: Extract documents in parallel (up to 4 workers)
+	// ===== STREAMED PIPELINE =====
+	// Each file flows: Extract → Summary (async) + Chunk → Embed
+	// No barrier between extraction and embedding — as soon as a file is
+	// extracted, its chunks enter the embedding pipeline immediately.
+
 	type extractResult struct {
 		chunks []extractor.DocumentChunk
 		err    error
 		file   string
 	}
 
+	// Thread-safe counters for progress
+	var (
+		filesDone   int32 // atomic
+		chunksTotal int64 // atomic — grows as files are chunked
+	)
+
+	// Channel to stream extracted files into the processor
 	resultsCh := make(chan extractResult, len(files))
 	extractSem := make(chan struct{}, 4) // max 4 concurrent extractions
 	var extractWg sync.WaitGroup
-	var filesDone int32 // atomic counter for progress
 
+	// --- Extraction workers: extract files in parallel ---
 	for _, filename := range files {
 		extractWg.Add(1)
 		go func(fname string) {
 			defer extractWg.Done()
 
-			// Check cancellation before acquiring slot
 			select {
 			case <-ctx.Done():
 				resultsCh <- extractResult{nil, ctx.Err(), fname}
 				return
-			case extractSem <- struct{}{}: // acquire slot
+			case extractSem <- struct{}{}:
 			}
-			defer func() { <-extractSem }() // release slot
+			defer func() { <-extractSem }()
 
 			filePath := filepath.Join(uploadsDir, fname)
 			ext := strings.ToLower(filepath.Ext(fname))
@@ -889,7 +901,6 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 			start := time.Now()
 			log.Printf("Extracting %s...", fname)
 
-			// Build OCR config from server state
 			s.mu.RLock()
 			ocrCfg := &extractor.OCRConfig{
 				Provider:    s.ocrProvider,
@@ -898,9 +909,6 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 			}
 			s.mu.RUnlock()
 
-			// Run extraction directly — each OCR provider manages its own timeouts
-			// (Sarvam: 10-min poll, Tesseract: CPU-bound, naturally finishes).
-			// Only user cancellation (ctx) can interrupt.
 			var docChunks []extractor.DocumentChunk
 			var extractErr error
 			switch ext {
@@ -915,11 +923,10 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 				log.Printf("Failed to extract %s after %v: %v", fname, elapsed, extractErr)
 				resultsCh <- extractResult{nil, extractErr, fname}
 			} else {
-				log.Printf("Extracted %s: %d chunks in %v", fname, len(docChunks), elapsed)
+				log.Printf("Extracted %s: %d pages in %v", fname, len(docChunks), elapsed)
 				resultsCh <- extractResult{docChunks, nil, fname}
 			}
 
-			// Update progress atomically
 			newDone := int(atomic.AddInt32(&filesDone, 1))
 			s.ingestStatus.mu.Lock()
 			s.ingestStatus.FilesDone = newDone
@@ -927,45 +934,136 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		}(filename)
 	}
 
-	// Wait for all extractions to finish, then close results channel
+	// Close resultsCh when all extractions finish
 	go func() {
 		extractWg.Wait()
 		close(resultsCh)
 	}()
 
-	// Collect results
-	var allChunks []extractor.DocumentChunk
+	// --- Processor: reads extraction results, chunks, and submits to embedding ---
+	// The embedding work is done concurrently via idx.EmbedAndIndex which
+	// internally uses a 6-concurrent-batch worker pool.
+
+	s.mu.RLock()
+	openAIKey := s.providerKeys["openai"]
+	s.mu.RUnlock()
+
 	var fileResults []FileResult
+	var fileResultsMu sync.Mutex
+	var embedWg sync.WaitGroup   // tracks in-flight embedding goroutines
+	var summaryWg sync.WaitGroup // tracks in-flight summary goroutines
+
+	var firstErr error
+	var errOnce sync.Once
+	var anyFileOk bool
+
 	for res := range resultsCh {
-		if res.err == nil && res.chunks != nil {
-			allChunks = append(allChunks, res.chunks...)
-			fileResults = append(fileResults, FileResult{
-				Name:   res.file,
-				Status: "ok",
-				Chunks: len(res.chunks),
-			})
-		} else {
+		if ctx.Err() != nil {
+			break
+		}
+
+		if res.err != nil || res.chunks == nil {
 			errMsg := "unknown error"
 			if res.err != nil {
 				errMsg = res.err.Error()
 			}
+			fileResultsMu.Lock()
 			fileResults = append(fileResults, FileResult{
 				Name:   res.file,
 				Status: "failed",
 				Error:  errMsg,
 			})
+			fileResultsMu.Unlock()
+			continue
 		}
+
+		anyFileOk = true
+		docChunks := res.chunks
+		fileName := res.file
+
+		// Generate doc summary in the background (non-blocking)
+		if openAIKey != "" {
+			summaryWg.Add(1)
+			go func(dc []extractor.DocumentChunk, fname string) {
+				defer summaryWg.Done()
+				var pages []string
+				for _, c := range dc {
+					pages = append(pages, c.Text)
+				}
+				summary, err := llm.GenerateDocSummary(ctx, openAIKey, fname, pages, len(pages))
+				if err != nil {
+					log.Printf("Warning: failed to generate summary for %s: %v", fname, err)
+					return
+				}
+				idx.AddDocSummary(*summary)
+				log.Printf("Generated summary for %s: %s (%s)", fname, summary.Title, summary.DocType)
+			}(docChunks, fileName)
+		}
+
+		// Chunk this file's pages immediately
+		fileChunks := idx.ChunkPages(docChunks)
+		numChunks := len(fileChunks)
+		log.Printf("Chunked %s: %d pages → %d chunks", fileName, len(docChunks), numChunks)
+
+		// Update running total of chunks
+		atomic.AddInt64(&chunksTotal, int64(numChunks))
+		s.ingestStatus.mu.Lock()
+		s.ingestStatus.ChunksTotal = int(atomic.LoadInt64(&chunksTotal))
+		s.ingestStatus.mu.Unlock()
+
+		fileResultsMu.Lock()
+		fileResults = append(fileResults, FileResult{
+			Name:   fileName,
+			Status: "ok",
+			Chunks: numChunks,
+		})
+		fileResultsMu.Unlock()
+
+		// Submit chunks for embedding (runs concurrently with next file's extraction)
+		embedWg.Add(1)
+		go func(chunks []indexer.Chunk, fname string) {
+			defer embedWg.Done()
+
+			// Progress callback: update global status from actual indexed count
+			embedProgress := func(total, done int) {
+				s.ingestStatus.mu.Lock()
+				s.ingestStatus.ChunksTotal = int(atomic.LoadInt64(&chunksTotal))
+				s.ingestStatus.ChunksDone = len(idx.Chunks) // actual embedded count
+				s.ingestStatus.mu.Unlock()
+			}
+
+			if err := idx.EmbedAndIndex(ctx, chunks, embedProgress, 0); err != nil {
+				if ctx.Err() == nil {
+					errOnce.Do(func() { firstErr = err })
+					log.Printf("Embedding error for %s: %v", fname, err)
+				}
+			}
+		}(fileChunks, fileName)
 	}
 
-	// Store file results in ingest status
+	// Wait for all embedding work to complete
+	embedWg.Wait()
+	// Wait for all summary generation to complete
+	summaryWg.Wait()
+
+	// Store file results
 	s.ingestStatus.mu.Lock()
 	s.ingestStatus.FileResults = fileResults
 	s.ingestStatus.mu.Unlock()
 
-	log.Printf("Extracted %d pages from %d files", len(allChunks), len(files))
+	// Check for cancellation
+	if ctx.Err() != nil {
+		log.Printf("Ingestion cancelled")
+		s.ingestStatus.mu.Lock()
+		s.ingestStatus.Phase = "cancelled"
+		s.ingestStatus.Error = "Processing was cancelled"
+		s.ingestStatus.mu.Unlock()
+		_ = idx.Close()
+		return
+	}
 
-	// Guard: if no text was extracted from any file, error out
-	if len(allChunks) == 0 {
+	// Check if any files succeeded
+	if !anyFileOk {
 		log.Printf("No text extracted from any uploaded file")
 		s.ingestStatus.mu.Lock()
 		s.ingestStatus.Phase = "error"
@@ -975,73 +1073,17 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		return
 	}
 
-	// Check cancellation before starting embedding phase
-	if ctx.Err() != nil {
-		log.Printf("Ingestion cancelled before embedding phase")
-		s.ingestStatus.mu.Lock()
-		s.ingestStatus.Phase = "cancelled"
-		s.ingestStatus.Error = "Processing was cancelled"
-		s.ingestStatus.mu.Unlock()
-		_ = idx.Close()
-		return
-	}
-
-	// Phase 1.5: Generate document summaries (L0 layer)
-	// Group pages by document for summary generation
-	docPages := make(map[string][]string)
-	for _, chunk := range allChunks {
-		docPages[chunk.Document] = append(docPages[chunk.Document], chunk.Text)
-	}
-
-	s.mu.RLock()
-	openAIKey := s.providerKeys["openai"]
-	s.mu.RUnlock()
-
-	if openAIKey != "" {
-		log.Printf("Generating document summaries for %d documents...", len(docPages))
-		for docName, pages := range docPages {
-			summary, err := llm.GenerateDocSummary(ctx, openAIKey, docName, pages, len(pages))
-			if err != nil {
-				log.Printf("Warning: failed to generate summary for %s: %v", docName, err)
-				continue
-			}
-			idx.DocSummaries = append(idx.DocSummaries, *summary)
-			log.Printf("Generated summary for %s: %s (%s), %d sections", docName, summary.Title, summary.DocType, len(summary.Sections))
-		}
-	} else {
-		log.Printf("Skipping document summary generation (no OpenAI API key)")
-	}
-
-	// Phase 2: Chunk + embed (with live progress reporting)
-	s.ingestStatus.mu.Lock()
-	s.ingestStatus.Phase = "embedding"
-	s.ingestStatus.mu.Unlock()
-
-	progressFn := func(total, done int) {
-		s.ingestStatus.mu.Lock()
-		s.ingestStatus.ChunksTotal = total
-		s.ingestStatus.ChunksDone = done
-		s.ingestStatus.mu.Unlock()
-	}
-
-	if err := idx.AddDocumentWithProgress(ctx, allChunks, progressFn); err != nil {
-		// Check if it was a cancellation
-		if ctx.Err() != nil {
-			log.Printf("Ingestion cancelled during embedding phase")
-			s.ingestStatus.mu.Lock()
-			s.ingestStatus.Phase = "cancelled"
-			s.ingestStatus.Error = "Processing was cancelled"
-			s.ingestStatus.mu.Unlock()
-			_ = idx.Close()
-			return
-		}
+	// Check for embedding errors
+	if firstErr != nil {
 		s.ingestStatus.mu.Lock()
 		s.ingestStatus.Phase = "error"
-		s.ingestStatus.Error = fmt.Sprintf("Embedding error: %v", err)
+		s.ingestStatus.Error = fmt.Sprintf("Embedding error: %v", firstErr)
 		s.ingestStatus.mu.Unlock()
 		_ = idx.Close()
 		return
 	}
+
+	log.Printf("All files processed: %d chunks total", len(idx.Chunks))
 
 	// Save vectors
 	if err := idx.SaveVectors(vectorsPath); err != nil {

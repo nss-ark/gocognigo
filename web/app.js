@@ -772,7 +772,7 @@ async function startIngestion() {
 function startIngestPolling() {
     if (ingestPollInterval) clearInterval(ingestPollInterval);
 
-    updateIngestUI({ phase: 'extracting', files_done: 0, files_total: 0, chunks_done: 0, chunks_total: 0 });
+    updateIngestUI({ phase: 'processing', files_done: 0, files_total: 0, chunks_done: 0, chunks_total: 0 });
 
     ingestPollInterval = setInterval(async () => {
         try {
@@ -823,11 +823,20 @@ function updateIngestUI(status) {
 
     switch (status.phase) {
         case 'extracting':
-            phaseLabel.textContent = 'Extracting text from documents...';
-            title.textContent = 'Processing Documents...';
+        // Legacy/backward compat — treat like processing
+        case 'processing':
+            // Show combined extraction + embedding progress
+            if (status.chunks_total > 0) {
+                phaseLabel.textContent = `Extracting & embedding documents...`;
+                title.textContent = 'Building Knowledge Index...';
+            } else {
+                phaseLabel.textContent = 'Extracting text from documents...';
+                title.textContent = 'Processing Documents...';
+            }
             break;
         case 'embedding':
-            phaseLabel.textContent = 'Generating embeddings (this may take a while)...';
+            // Legacy compat
+            phaseLabel.textContent = 'Generating embeddings...';
             title.textContent = 'Building Knowledge Index...';
             break;
         case 'done':
@@ -838,15 +847,21 @@ function updateIngestUI(status) {
             phaseLabel.textContent = status.phase;
     }
 
-    progressFiles.textContent = `${status.files_done} / ${status.files_total} files`;
-    progressChunks.textContent = `${status.chunks_done} chunks`;
+    progressFiles.textContent = `${status.files_done} / ${status.files_total} files extracted`;
+    if (status.chunks_total > 0) {
+        progressChunks.textContent = `${status.chunks_done} / ${status.chunks_total} chunks embedded`;
+    } else {
+        progressChunks.textContent = `${status.chunks_done} chunks`;
+    }
 
-    // Calculate progress
+    // Calculate progress: extraction is 30%, embedding is 70% (embedding is the bottleneck)
     let pct = 0;
-    if (status.phase === 'extracting' && status.files_total > 0) {
-        pct = (status.files_done / status.files_total) * 50; // extraction is 0-50%
+    if (status.phase === 'processing' || status.phase === 'extracting') {
+        const extractPct = status.files_total > 0 ? (status.files_done / status.files_total) * 30 : 0;
+        const embedPct = status.chunks_total > 0 ? (status.chunks_done / status.chunks_total) * 70 : 0;
+        pct = extractPct + embedPct;
     } else if (status.phase === 'embedding') {
-        pct = 50 + (status.chunks_total > 0 ? (status.chunks_done / status.chunks_total) * 50 : 0);
+        pct = 30 + (status.chunks_total > 0 ? (status.chunks_done / status.chunks_total) * 70 : 0);
     } else if (status.phase === 'done') {
         pct = 100;
     }
@@ -1191,8 +1206,8 @@ function appendAnswer(data) {
     const modelLabel = currentModel || 'default';
     const timeSec = data.time_seconds ? data.time_seconds.toFixed(2) + 's' : '';
 
-    // Build the answer text with footnote markers
-    let answerHtml = escapeHtml(answer.answer || '');
+    // Build the answer text with markdown rendering
+    let answerHtml = renderMarkdown(answer.answer || '');
 
     // Replace [N] markers with styled footnote refs
     answerHtml = answerHtml.replace(/\[(\d+)\]/g, (match, num) => {
@@ -1398,7 +1413,7 @@ function renderBatchResults(data) {
 
             card.innerHTML = `
                 <div class="batch-question"><span class="batch-q-num">${i + 1}</span>${escapeHtml(TEST_QUESTIONS[i])}</div>
-                <div class="batch-answer">${escapeHtml(answer.answer)}</div>
+                <div class="batch-answer">${renderMarkdown(answer.answer)}</div>
                 ${sourcesHtml}
                 <div class="result-confidence" style="margin-top:0.5rem">
                     <div class="confidence-bar">
@@ -1424,4 +1439,60 @@ function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+// Lightweight markdown-to-HTML renderer for LLM answers.
+// First escapes HTML (safe), then applies markdown patterns.
+function renderMarkdown(text) {
+    if (!text) return '';
+    let html = escapeHtml(text);
+
+    // Code blocks: ```...```
+    html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+
+    // Inline code: `...`
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // Bold: **text** or __text__
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+
+    // Italic: *text* or _text_ (but not inside words)
+    html = html.replace(/(?<![\w*])\*([^*]+)\*(?![\w*])/g, '<em>$1</em>');
+    html = html.replace(/(?<![\w_])_([^_]+)_(?![\w_])/g, '<em>$1</em>');
+
+    // Headers: ### text, ## text, # text (at line start)
+    html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+    html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
+
+    // Numbered lists: handle items separated by blank lines (LLM style)
+    // First, convert each "N. text" line into an <ol> item with correct start
+    html = html.replace(/^(\d+)\.\s(.+)$/gm, (match, num, text) => {
+        return `<ol start="${num}"><li>${text}</li></ol>`;
+    });
+    // Merge adjacent <ol> elements into a single list
+    html = html.replace(/<\/ol>\s*(?:<br\s*\/?>|\n)*\s*<ol start="\d+">/g, '');
+
+    // Bullet lists: lines starting with "- " or "* "
+    html = html.replace(/((?:^[\-*]\s.+$\n?)+)/gm, (match) => {
+        const items = match.trim().split('\n').map(line => {
+            return '<li>' + line.replace(/^[\-*]\s/, '') + '</li>';
+        }).join('');
+        return '<ul>' + items + '</ul>';
+    });
+
+    // Paragraphs: double newlines
+    html = html.replace(/\n\n+/g, '</p><p>');
+    // Single newlines → <br>
+    html = html.replace(/\n/g, '<br>');
+    // Wrap in paragraph tags
+    html = '<p>' + html + '</p>';
+    // Clean up empty paragraphs
+    html = html.replace(/<p>\s*<\/p>/g, '');
+    // Don't wrap block elements in <p>
+    html = html.replace(/<p>(<(?:ol|ul|h[2-4]|pre))/g, '$1');
+    html = html.replace(/(<\/(?:ol|ul|h[2-4]|pre)>)<\/p>/g, '$1');
+
+    return html;
 }

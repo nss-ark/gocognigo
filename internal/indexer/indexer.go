@@ -110,17 +110,17 @@ func (idx *Index) AddDocument(ctx context.Context, docChunks []extractor.Documen
 	return idx.AddDocumentWithProgress(ctx, docChunks, nil)
 }
 
-// AddDocumentWithProgress processes document chunks with a progress callback.
-// It chunks the text, then embeds batches concurrently (up to 3 parallel) with retry logic.
-func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extractor.DocumentChunk, progress ProgressFunc) error {
+// ChunkPages splits extracted document pages into small (~150-word) search chunks
+// linked to their full-page parent text. This is a pure function on the Index
+// (only reads DocSummaries for section lookup) and is safe to call concurrently.
+func (idx *Index) ChunkPages(docChunks []extractor.DocumentChunk) []Chunk {
 	var indexChunks []Chunk
 
 	// Build section lookup from document summaries
 	sectionMap := idx.buildSectionMap()
 
-	// Chunking: small 150-word search chunks linked to full-page parent text
 	for _, page := range docChunks {
-		parentText := page.Text // full page = parent chunk (L1)
+		parentText := page.Text
 		section := sectionMap.lookup(page.Document, page.PageNumber)
 		words := strings.Fields(page.Text)
 		chunkSize := 150
@@ -150,30 +150,36 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 		}
 	}
 
-	totalChunks := len(indexChunks)
-	log.Printf("Chunking complete: %d chunks from %d pages", totalChunks, len(docChunks))
-	if progress != nil {
-		progress(totalChunks, 0)
+	return indexChunks
+}
+
+// EmbedAndIndex embeds a slice of chunks and adds them to both the vector and BM25 indexes.
+// It processes in batches of 200 with up to 6 concurrent API calls, with retry logic.
+// Thread-safe: multiple goroutines can call this on the same Index.
+func (idx *Index) EmbedAndIndex(ctx context.Context, chunks []Chunk, progress ProgressFunc, progressOffset int) error {
+	if len(chunks) == 0 {
+		return nil
 	}
 
-	// Build batch jobs — larger batches for better throughput
-	// OpenAI supports up to 2048 inputs; HuggingFace free tier needs smaller batches
-	batchSize := 100
+	totalChunks := len(chunks)
+
+	// Build batch jobs — 200 per batch for good throughput
+	batchSize := 200
 	type batchJob struct {
 		start int
 		end   int
 	}
 	var jobs []batchJob
-	for i := 0; i < len(indexChunks); i += batchSize {
+	for i := 0; i < len(chunks); i += batchSize {
 		end := i + batchSize
-		if end > len(indexChunks) {
-			end = len(indexChunks)
+		if end > len(chunks) {
+			end = len(chunks)
 		}
 		jobs = append(jobs, batchJob{start: i, end: end})
 	}
 
 	// Run embedding batches with concurrency limit
-	concurrency := 4
+	concurrency := 6
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	var firstErr error
@@ -182,7 +188,6 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 	var doneMu sync.Mutex
 
 	for _, job := range jobs {
-		// Acquire slot with cancellation check
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
@@ -193,21 +198,20 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 
 		go func(j batchJob) {
 			defer wg.Done()
-			defer func() { <-sem }() // release slot
+			defer func() { <-sem }()
 
-			// Check context at batch start
 			if ctx.Err() != nil {
 				errOnce.Do(func() { firstErr = ctx.Err() })
 				return
 			}
 
-			batch := indexChunks[j.start:j.end]
+			batch := chunks[j.start:j.end]
 			var inputs []string
 			for _, c := range batch {
 				inputs = append(inputs, c.Text)
 			}
 
-			// Retry with exponential backoff (5 attempts, longer waits for free-tier APIs)
+			// Retry with exponential backoff (5 attempts)
 			var embeddings [][]float32
 			var err error
 			for attempt := 0; attempt < 5; attempt++ {
@@ -220,7 +224,6 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 					break
 				}
 				if attempt < 4 {
-					// Backoff: 3s, 6s, 12s, 20s — but cancel-aware
 					wait := time.Duration(3*(1<<uint(attempt))) * time.Second
 					if wait > 20*time.Second {
 						wait = 20 * time.Second
@@ -249,7 +252,6 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 				batch[k].Embedding = emb
 				idx.Chunks = append(idx.Chunks, batch[k])
 
-				// Add to BM25 index
 				bm25Err := idx.BM25Index.Index(batch[k].ID, map[string]interface{}{
 					"id":   batch[k].ID,
 					"text": batch[k].Text,
@@ -265,7 +267,7 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 			doneMu.Lock()
 			doneCount += len(batch)
 			if progress != nil {
-				progress(totalChunks, doneCount)
+				progress(totalChunks, progressOffset+doneCount)
 			}
 			log.Printf("Embedded %d / %d chunks", doneCount, totalChunks)
 			doneMu.Unlock()
@@ -279,6 +281,20 @@ func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extra
 	}
 
 	return nil
+}
+
+// AddDocumentWithProgress processes document chunks with a progress callback.
+// It chunks the text, then embeds batches concurrently with retry logic.
+func (idx *Index) AddDocumentWithProgress(ctx context.Context, docChunks []extractor.DocumentChunk, progress ProgressFunc) error {
+	indexChunks := idx.ChunkPages(docChunks)
+
+	totalChunks := len(indexChunks)
+	log.Printf("Chunking complete: %d chunks from %d pages", totalChunks, len(docChunks))
+	if progress != nil {
+		progress(totalChunks, 0)
+	}
+
+	return idx.EmbedAndIndex(ctx, indexChunks, progress, 0)
 }
 
 // sectionLookup maps document+page to section names.
@@ -338,6 +354,13 @@ func (idx *Index) LoadVectors(path string) error {
 	}
 	// Fallback: legacy format (just chunks array)
 	return json.Unmarshal(data, &idx.Chunks)
+}
+
+// AddDocSummary appends a document summary in a thread-safe way.
+func (idx *Index) AddDocSummary(summary DocumentSummary) {
+	idx.mu.Lock()
+	idx.DocSummaries = append(idx.DocSummaries, summary)
+	idx.mu.Unlock()
 }
 
 // Close closes the BM25 index. Must be called before opening a different index.
