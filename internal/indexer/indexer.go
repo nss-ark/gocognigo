@@ -3,6 +3,7 @@ package indexer
 import (
 	"bytes"
 	"context"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -326,12 +327,22 @@ type vectorStore struct {
 	DocSummaries []DocumentSummary `json:"doc_summaries,omitempty"`
 }
 
-// Save Vector index to disk (since BM25 is already on disk via Bleve)
+// Save Vector index to disk in both binary (fast) and JSON (fallback) formats.
 func (idx *Index) SaveVectors(path string) error {
 	store := vectorStore{
 		Chunks:       idx.Chunks,
 		DocSummaries: idx.DocSummaries,
 	}
+
+	// Save binary format (primary — 5-10x faster to load)
+	gobPath := strings.TrimSuffix(path, ".json") + ".gob"
+	if err := idx.saveVectorsBinary(gobPath, store); err != nil {
+		log.Printf("Warning: failed to save binary vectors: %v", err)
+	} else {
+		log.Printf("Saved binary vectors: %s", gobPath)
+	}
+
+	// Also save JSON format (backward compat)
 	data, err := json.Marshal(store)
 	if err != nil {
 		return err
@@ -339,8 +350,30 @@ func (idx *Index) SaveVectors(path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// Load Vectors from disk
+func (idx *Index) saveVectorsBinary(path string, store vectorStore) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return gob.NewEncoder(f).Encode(store)
+}
+
+// Load Vectors from disk — tries binary (fast) first, falls back to JSON.
 func (idx *Index) LoadVectors(path string) error {
+	start := time.Now()
+
+	// Try binary format first (5-10x faster)
+	gobPath := strings.TrimSuffix(path, ".json") + ".gob"
+	if _, err := os.Stat(gobPath); err == nil {
+		if err := idx.loadVectorsBinary(gobPath); err == nil {
+			log.Printf("Loaded %d chunks from binary in %v", len(idx.Chunks), time.Since(start))
+			return nil
+		}
+		log.Printf("Binary load failed, falling back to JSON: %v", err)
+	}
+
+	// Fallback: JSON format
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -350,10 +383,30 @@ func (idx *Index) LoadVectors(path string) error {
 	if err := json.Unmarshal(data, &store); err == nil && len(store.Chunks) > 0 {
 		idx.Chunks = store.Chunks
 		idx.DocSummaries = store.DocSummaries
+		log.Printf("Loaded %d chunks from JSON in %v", len(idx.Chunks), time.Since(start))
 		return nil
 	}
 	// Fallback: legacy format (just chunks array)
-	return json.Unmarshal(data, &idx.Chunks)
+	if err := json.Unmarshal(data, &idx.Chunks); err != nil {
+		return err
+	}
+	log.Printf("Loaded %d chunks from legacy JSON in %v", len(idx.Chunks), time.Since(start))
+	return nil
+}
+
+func (idx *Index) loadVectorsBinary(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var store vectorStore
+	if err := gob.NewDecoder(f).Decode(&store); err != nil {
+		return err
+	}
+	idx.Chunks = store.Chunks
+	idx.DocSummaries = store.DocSummaries
+	return nil
 }
 
 // AddDocSummary appends a document summary in a thread-safe way.

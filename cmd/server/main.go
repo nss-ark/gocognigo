@@ -30,6 +30,11 @@ type Server struct {
 	activeConversation *chat.Conversation
 	activeIndex        *indexer.Index
 	activeRetriever    *retriever.Retriever
+	indexLoading       bool // true while background index load is in progress
+
+	// Index cache: keeps loaded indexes in memory keyed by project ID
+	// so switching back to a previously-loaded project is instant.
+	indexCache map[string]*cachedIndex
 
 	projects     *chat.ProjectStore
 	ingestStatus *IngestStatus
@@ -42,6 +47,11 @@ type Server struct {
 	ocrProvider   string // "tesseract", "sarvam", or ""
 	sarvamAPIKey  string
 	tesseractOk   bool // true if tesseract CLI is on PATH
+}
+
+type cachedIndex struct {
+	idx *indexer.Index
+	ret *retriever.Retriever
 }
 
 // IngestStatus is polled by the frontend to show progress.
@@ -284,6 +294,7 @@ func main() {
 		ocrProvider:   ocrProvider,
 		sarvamAPIKey:  sarvamAPIKey,
 		tesseractOk:   tesseractOk,
+		indexCache:    make(map[string]*cachedIndex),
 	}
 
 	mux := http.NewServeMux()
@@ -302,6 +313,7 @@ func main() {
 	mux.HandleFunc("/api/ingest/cancel", srv.handleCancelIngest)
 	mux.HandleFunc("/api/files/delete", srv.handleDeleteSingleFile)
 	mux.HandleFunc("/api/settings", srv.handleSettings)
+	mux.HandleFunc("/api/index-status", srv.handleIndexStatus)
 
 	// Project endpoints
 	mux.HandleFunc("/api/chats", srv.handleProjects)
@@ -421,18 +433,16 @@ func (s *Server) handleActivateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	// Close previous index
-	if s.activeIndex != nil {
-		_ = s.activeIndex.Close()
-		s.activeIndex = nil
-		s.activeRetriever = nil
-	}
+	// Don't close previous index — it stays in cache
+	s.activeIndex = nil
+	s.activeRetriever = nil
 	s.activeProject = sess
 	s.activeConversation = nil // reset conversation
 	s.ingestStatus.reset()
+	s.indexLoading = false
 	s.mu.Unlock()
 
-	// If the project is ready, load indexes in background (non-blocking)
+	// If the project is ready, check cache first then load in background
 	if sess.Status == "ready" {
 		// Set up conversations immediately (fast, no disk I/O)
 		convs := s.projects.ListConversations(sess.ID)
@@ -450,12 +460,27 @@ func (s *Server) handleActivateProject(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 		}
 
-		// Load indexes in background — doesn't block the response
-		go func(projectID string) {
-			if err := s.loadChatIndexes(projectID); err != nil {
-				log.Printf("Warning: could not load indexes for project %s: %v", projectID, err)
-			}
-		}(sess.ID)
+		// Check in-memory cache first — instant if already loaded
+		s.mu.Lock()
+		if cached, ok := s.indexCache[sess.ID]; ok {
+			s.activeIndex = cached.idx
+			s.activeRetriever = cached.ret
+			s.mu.Unlock()
+			log.Printf("Index cache hit for project %s — instant switch", sess.ID)
+		} else {
+			// Signal that index is loading
+			s.indexLoading = true
+			s.mu.Unlock()
+			// Load in background
+			go func(projectID string) {
+				if err := s.loadChatIndexes(projectID); err != nil {
+					log.Printf("Warning: could not load indexes for project %s: %v", projectID, err)
+				}
+				s.mu.Lock()
+				s.indexLoading = false
+				s.mu.Unlock()
+			}(sess.ID)
+		}
 	}
 
 	jsonResp(w, sess)
@@ -1248,6 +1273,26 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleIndexStatus returns whether the vector index is loaded and ready for queries.
+func (s *Server) handleIndexStatus(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	ready := s.activeRetriever != nil
+	loading := s.indexLoading
+	s.mu.RUnlock()
+
+	status := "ready"
+	if loading {
+		status = "loading"
+	} else if !ready {
+		status = "not_loaded"
+	}
+
+	jsonResp(w, map[string]interface{}{
+		"status": status,
+		"ready":  ready,
+	})
+}
+
 // loadChatIndexes loads a chat's pre-built indexes from disk.
 func (s *Server) loadChatIndexes(ProjectID string) error {
 	bm25Dir := s.projects.BM25Dir(ProjectID)
@@ -1268,12 +1313,19 @@ func (s *Server) loadChatIndexes(ProjectID string) error {
 		return fmt.Errorf("failed to load vectors: %w", err)
 	}
 
+	ret := retriever.NewRetriever(idx)
+
 	s.mu.Lock()
 	s.activeIndex = idx
-	s.activeRetriever = retriever.NewRetriever(idx)
+	s.activeRetriever = ret
+	// Store in cache for future instant switches
+	if s.indexCache == nil {
+		s.indexCache = make(map[string]*cachedIndex)
+	}
+	s.indexCache[ProjectID] = &cachedIndex{idx: idx, ret: ret}
 	s.mu.Unlock()
 
-	log.Printf("Loaded %d chunks for chat %s", len(idx.Chunks), ProjectID)
+	log.Printf("Loaded %d chunks for project %s (cached)", len(idx.Chunks), ProjectID)
 	return nil
 }
 

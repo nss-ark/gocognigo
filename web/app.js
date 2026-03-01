@@ -2,7 +2,7 @@
 
 const API_BASE = '';
 
-const TEST_QUESTIONS = [
+const DEFAULT_BATCH_QUESTIONS = [
     "What are the revenue figures for Meta for Q1, Q2 and Q3?",
     "What was KFIN's revenue in 2021?",
     "What metrics helped CCI determine if the combination would be anticompetitive?",
@@ -11,6 +11,9 @@ const TEST_QUESTIONS = [
     "What is the governing law in the NVCA IRA?",
     "If Pristine were to acquire an indian company that had turnover of 1Cr and no assets, would it have to notify the deal to the CCI?"
 ];
+
+// Load batch questions from localStorage or use defaults
+let batchQuestions = JSON.parse(localStorage.getItem('batchQuestions')) || [...DEFAULT_BATCH_QUESTIONS];
 
 // ===== State =====
 let currentPhase = 'upload';    // 'upload' | 'processing' | 'chat'
@@ -32,6 +35,7 @@ let ingestPollInterval = null;
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
     loadProviders();
+    renderBatchQuestions();
 
     // Sidebar toggle (mobile)
     document.getElementById('sidebarToggle').addEventListener('click', () => {
@@ -216,6 +220,8 @@ async function activateProject(id) {
             showPhase('chat');
             // Load conversations for this project
             await loadConversations();
+            // Poll index-status until the index is ready
+            waitForIndex();
         } else if (proj.status === 'processing') {
             showPhase('processing');
             startIngestPolling();
@@ -959,6 +965,51 @@ async function continueToChat() {
     await loadConversations();
 }
 
+// Poll /api/index-status until the index is loaded, showing a loading banner
+function waitForIndex() {
+    const thread = document.getElementById('conversationThread');
+    const input = document.getElementById('queryInput');
+    const submitBtn = document.getElementById('submitBtn');
+
+    // Check right away — might already be cached
+    fetch(`${API_BASE}/api/index-status`).then(r => r.json()).then(data => {
+        if (data.ready) return; // Already loaded (cache hit)
+
+        // Show loading banner
+        const banner = document.createElement('div');
+        banner.id = 'indexLoadingBanner';
+        banner.className = 'index-loading-banner';
+        banner.innerHTML = `
+            <div class="spinner" style="width:16px;height:16px;border-width:2px"></div>
+            <span>Loading document index...</span>
+        `;
+        thread.prepend(banner);
+        input.disabled = true;
+        submitBtn.disabled = true;
+
+        // Poll every 300ms
+        const poll = setInterval(async () => {
+            try {
+                const res = await fetch(`${API_BASE}/api/index-status`);
+                const status = await res.json();
+                if (status.ready) {
+                    clearInterval(poll);
+                    input.disabled = false;
+                    submitBtn.disabled = false;
+                    const el = document.getElementById('indexLoadingBanner');
+                    if (el) {
+                        el.style.opacity = '0';
+                        setTimeout(() => el.remove(), 300);
+                    }
+                    loadStats();
+                }
+            } catch (e) {
+                // ignore poll errors
+            }
+        }, 300);
+    });
+}
+
 // ===== Settings =====
 
 async function loadSettings() {
@@ -1333,7 +1384,7 @@ async function runBatch() {
         const res = await fetch(`${API_BASE}/api/batch`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ questions: TEST_QUESTIONS, provider: currentProvider, model: currentModel })
+            body: JSON.stringify({ questions: batchQuestions, provider: currentProvider, model: currentModel })
         });
 
         if (!res.ok) {
@@ -1394,7 +1445,7 @@ function renderBatchResults(data) {
 
         if (!answer) {
             card.innerHTML = `
-                <div class="batch-question"><span class="batch-q-num">${i + 1}</span>${escapeHtml(TEST_QUESTIONS[i])}</div>
+                <div class="batch-question"><span class="batch-q-num">${i + 1}</span>${escapeHtml(batchQuestions[i] || 'Question ' + (i + 1))}</div>
                 <div class="batch-answer" style="color:var(--danger)">Error \u2014 no answer returned</div>
             `;
         } else {
@@ -1412,7 +1463,7 @@ function renderBatchResults(data) {
             }
 
             card.innerHTML = `
-                <div class="batch-question"><span class="batch-q-num">${i + 1}</span>${escapeHtml(TEST_QUESTIONS[i])}</div>
+                <div class="batch-question"><span class="batch-q-num">${i + 1}</span>${escapeHtml(batchQuestions[i] || 'Question ' + (i + 1))}</div>
                 <div class="batch-answer">${renderMarkdown(answer.answer)}</div>
                 ${sourcesHtml}
                 <div class="result-confidence" style="margin-top:0.5rem">
@@ -1495,4 +1546,61 @@ function renderMarkdown(text) {
     html = html.replace(/(<\/(?:ol|ul|h[2-4]|pre)>)<\/p>/g, '$1');
 
     return html;
+}
+
+// ===== Batch Question Editor =====
+
+function saveBatchQuestions() {
+    localStorage.setItem('batchQuestions', JSON.stringify(batchQuestions));
+}
+
+function renderBatchQuestions() {
+    const container = document.getElementById('batchQuestionsList');
+    if (!container) return;
+
+    container.innerHTML = batchQuestions.map((q, i) => `
+        <div class="batch-q-item" data-index="${i}">
+            <span class="batch-q-num">${i + 1}</span>
+            <input type="text" class="batch-q-input" value="${escapeHtml(q)}"
+                onchange="updateBatchQuestion(${i}, this.value)"
+                onblur="updateBatchQuestion(${i}, this.value)"
+                placeholder="Enter question...">
+            <button class="batch-q-remove" onclick="removeBatchQuestion(${i})" title="Remove">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+    `).join('');
+}
+
+function addBatchQuestion() {
+    batchQuestions.push('');
+    saveBatchQuestions();
+    renderBatchQuestions();
+    // Focus the new empty input
+    const inputs = document.querySelectorAll('.batch-q-input');
+    if (inputs.length > 0) {
+        inputs[inputs.length - 1].focus();
+    }
+}
+
+function removeBatchQuestion(index) {
+    batchQuestions.splice(index, 1);
+    saveBatchQuestions();
+    renderBatchQuestions();
+}
+
+function updateBatchQuestion(index, value) {
+    batchQuestions[index] = value.trim();
+    saveBatchQuestions();
+}
+
+function clearBatchQuestions() {
+    if (confirm('Reset to default questions?')) {
+        batchQuestions = [...DEFAULT_BATCH_QUESTIONS];
+        saveBatchQuestions();
+        renderBatchQuestions();
+    }
 }

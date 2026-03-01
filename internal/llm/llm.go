@@ -316,22 +316,78 @@ func parseAnswer(rawText string, question string) (*Answer, error) {
 	rawText = strings.Split(rawText, "```")[0]
 	rawText = strings.TrimSpace(rawText)
 
+	// If the text doesn't start with {, try to find JSON in it
+	if !strings.HasPrefix(rawText, "{") {
+		if idx := strings.Index(rawText, "{"); idx >= 0 {
+			rawText = rawText[idx:]
+		}
+	}
+
+	// Use a loose struct that accepts any types for fields the LLM may vary
 	var parsed struct {
-		Thinking         string     `json:"thinking"`
-		Answer           string     `json:"answer"`
-		Documents        []string   `json:"documents"`
-		Pages            []int      `json:"pages"`
-		Footnotes        []Footnote `json:"footnotes"`
-		Confidence       float64    `json:"confidence"`
-		ConfidenceReason string     `json:"confidence_reason"`
+		Thinking         string          `json:"thinking"`
+		Answer           string          `json:"answer"`
+		Documents        []string        `json:"documents"`
+		Pages            json.RawMessage `json:"pages"`
+		Footnotes        json.RawMessage `json:"footnotes"`
+		Confidence       float64         `json:"confidence"`
+		ConfidenceReason string          `json:"confidence_reason"`
 	}
 	if err := json.Unmarshal([]byte(rawText), &parsed); err != nil {
+		log.Printf("parseAnswer JSON error: %v (first 200 chars: %.200s)", err, rawText)
 		// JSON parse failed — return the raw text as the answer
 		return &Answer{
 			Question:   question,
 			Answer:     rawText,
 			Confidence: 0.5,
 		}, nil
+	}
+
+	// Parse pages flexibly (could be []int, []string, or mixed)
+	var pages []int
+	if len(parsed.Pages) > 0 {
+		// Try []int first
+		if err := json.Unmarshal(parsed.Pages, &pages); err != nil {
+			// Fall back: try []interface{} and coerce
+			var rawPages []interface{}
+			if err2 := json.Unmarshal(parsed.Pages, &rawPages); err2 == nil {
+				for _, p := range rawPages {
+					switch v := p.(type) {
+					case float64:
+						pages = append(pages, int(v))
+					default:
+						pages = append(pages, 0)
+					}
+				}
+			}
+		}
+	}
+
+	// Parse footnotes flexibly (page field could be int or string)
+	var footnotes []Footnote
+	if len(parsed.Footnotes) > 0 {
+		// Try strict parse first
+		if err := json.Unmarshal(parsed.Footnotes, &footnotes); err != nil {
+			// Fall back: parse with flexible page type
+			var rawFootnotes []struct {
+				ID       int         `json:"id"`
+				Document string      `json:"document"`
+				Page     interface{} `json:"page"`
+			}
+			if err2 := json.Unmarshal(parsed.Footnotes, &rawFootnotes); err2 == nil {
+				for _, fn := range rawFootnotes {
+					pageNum := 0
+					if v, ok := fn.Page.(float64); ok {
+						pageNum = int(v)
+					}
+					footnotes = append(footnotes, Footnote{
+						ID:       fn.ID,
+						Document: fn.Document,
+						Page:     pageNum,
+					})
+				}
+			}
+		}
 	}
 
 	// If the model returned valid JSON but the "answer" field is empty,
@@ -346,8 +402,8 @@ func parseAnswer(rawText string, question string) (*Answer, error) {
 		Thinking:         parsed.Thinking,
 		Answer:           answerText,
 		Documents:        parsed.Documents,
-		Pages:            parsed.Pages,
-		Footnotes:        parsed.Footnotes,
+		Pages:            pages,
+		Footnotes:        footnotes,
 		Confidence:       parsed.Confidence,
 		ConfidenceReason: parsed.ConfidenceReason,
 	}, nil

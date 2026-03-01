@@ -412,6 +412,35 @@
 
                 <!-- Batch panel -->
                 <section class="panel batch-panel hidden" id="batchPanel">
+                    <div class="batch-questions-editor">
+                        <div class="batch-editor-header">
+                            <h3 class="batch-editor-title">Batch Questions</h3>
+                            <div class="batch-editor-actions">
+                                <button class="batch-action-btn" onclick="addBatchQuestion()" title="Add question">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                                    </svg>
+                                    Add
+                                </button>
+                                <button class="batch-action-btn danger" onclick="clearBatchQuestions()"
+                                    title="Clear all">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path
+                                            d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2">
+                                        </path>
+                                    </svg>
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
+                        <div class="batch-questions-list" id="batchQuestionsList">
+                            <!-- Rendered by JS -->
+                        </div>
+                    </div>
                     <div class="batch-controls">
                         <button class="run-batch-btn" id="runBatchBtn" onclick="runBatch()">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -438,7 +467,7 @@
     <!-- Footer -->
     <footer class="footer">
         <span>Built with Go • Hybrid RAG • Multi-Provider LLM</span>
-        <span class="footer-accent">GoCognigo</span>
+        <span class="footer-accent">GoCognigo <span class="footer-version">v0.1.1</span></span>
     </footer>
 
     <script src="app.js"></script>
