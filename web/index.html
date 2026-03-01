@@ -99,12 +99,19 @@
                     <div class="settings-group">
                         <label class="settings-label">Embedding Provider</label>
                         <select id="settingsEmbed" class="settings-select">
+                            <option value="openai">OpenAI</option>
                             <option value="huggingface">HuggingFace</option>
                         </select>
                     </div>
 
                     <div class="settings-divider"></div>
 
+                    <div class="settings-group">
+                        <label class="settings-label">OpenAI API Key <span class="settings-hint-inline">(for
+                                embeddings)</span></label>
+                        <input type="password" id="settingsOpenAIKey" class="settings-input" placeholder="sk-..."
+                            autocomplete="off">
+                    </div>
                     <div class="settings-group">
                         <label class="settings-label">Anthropic API Key</label>
                         <input type="password" id="settingsAnthropicKey" class="settings-input" placeholder="sk-ant-..."

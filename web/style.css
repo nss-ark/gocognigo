@@ -634,6 +634,33 @@ body {
     font-weight: 500;
     color: var(--text-secondary);
     font-family: var(--font-mono);
+    position: relative;
+    transition: var(--transition);
+}
+
+.indexed-file-tag:hover {
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.indexed-file-delete {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1;
+    padding: 0 2px;
+    margin-left: 2px;
+    opacity: 0;
+    transition: var(--transition);
+}
+
+.indexed-file-tag:hover .indexed-file-delete {
+    opacity: 1;
+}
+
+.indexed-file-delete:hover {
+    color: var(--danger);
 }
 
 .indexed-file-tag .file-ext {

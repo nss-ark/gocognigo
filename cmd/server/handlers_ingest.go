@@ -220,13 +220,49 @@ func (s *Server) handleDeleteSingleFile(w http.ResponseWriter, r *http.Request) 
 			fileCount++
 		}
 	}
+
+	// Remove document chunks from the active index (if loaded for this project)
+	chunksRemoved := 0
+	s.mu.Lock()
+	if s.activeProjectID == req.ProjectID && s.activeIndex != nil {
+		chunksRemoved = s.activeIndex.RemoveDocument(clean)
+
+		if chunksRemoved > 0 {
+			// Re-save vectors to disk
+			vectorsPath := s.projects.VectorsPath(req.ProjectID)
+			if err := s.activeIndex.SaveVectors(vectorsPath); err != nil {
+				log.Printf("Warning: failed to re-save vectors after document removal: %v", err)
+			}
+
+			// Rebuild retriever with cleaned index
+			s.activeRetriever = retriever.NewRetriever(s.activeIndex)
+
+			// Update cache
+			s.indexCache.put(req.ProjectID, &cachedIndex{idx: s.activeIndex, ret: s.activeRetriever})
+		}
+	}
+	s.mu.Unlock()
+
 	sess, _ := s.projects.Get(req.ProjectID)
 	if sess != nil {
 		sess.FileCount = fileCount
+		if chunksRemoved > 0 {
+			sess.ChunkCount -= chunksRemoved
+			if sess.ChunkCount < 0 {
+				sess.ChunkCount = 0
+			}
+		}
 		_ = s.projects.Update(*sess)
 	}
 
-	jsonResp(w, map[string]interface{}{"status": "deleted", "remaining": fileCount})
+	log.Printf("Deleted file %q from project %s: %d chunks removed, %d files remaining",
+		clean, req.ProjectID, chunksRemoved, fileCount)
+
+	jsonResp(w, map[string]interface{}{
+		"status":         "deleted",
+		"remaining":      fileCount,
+		"chunks_removed": chunksRemoved,
+	})
 }
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {

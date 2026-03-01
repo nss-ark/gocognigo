@@ -146,6 +146,12 @@ async function removeFile(name) {
         // Refresh file list from server
         await loadUploadedFiles();
 
+        // Refresh stats (document count, chunk count) in header
+        await loadStats();
+
+        // Re-render indexed files panel
+        renderIndexedFiles();
+
         // Refresh projects to update file count in sidebar
         const projRes = await fetch(`${API_BASE}/api/chats`);
         projects = await projRes.json();

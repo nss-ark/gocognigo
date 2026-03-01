@@ -290,7 +290,9 @@ async function loadSettings() {
         const res = await fetch(`${API_BASE}/api/settings`);
         const s = await res.json();
         document.getElementById('settingsLLM').value = s.default_llm || 'anthropic';
-        document.getElementById('settingsEmbed').value = s.embed_provider || 'huggingface';
+        document.getElementById('settingsEmbed').value = s.embed_provider || 'openai';
+        document.getElementById('settingsOpenAIKey').value = '';
+        document.getElementById('settingsOpenAIKey').placeholder = s.openai_key ? s.openai_key : 'sk-...';
         document.getElementById('settingsAnthropicKey').value = s.anthropic_key || '';
         document.getElementById('settingsAnthropicKey').placeholder = s.anthropic_key ? s.anthropic_key : 'sk-ant-...';
         document.getElementById('settingsHFKey').value = s.huggingface_key || '';
@@ -330,8 +332,10 @@ async function saveSettings() {
     };
 
     // Only send keys if user typed a new one (not empty)
+    const oaKey = document.getElementById('settingsOpenAIKey').value.trim();
     const antKey = document.getElementById('settingsAnthropicKey').value.trim();
     const hfKey = document.getElementById('settingsHFKey').value.trim();
+    if (oaKey) body.openai_key = oaKey;
     if (antKey) body.anthropic_key = antKey;
     if (hfKey) body.huggingface_key = hfKey;
     const sarvamKey = document.getElementById('settingsSarvamKey').value.trim();

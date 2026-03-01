@@ -416,6 +416,49 @@ func (idx *Index) AddDocSummary(summary DocumentSummary) {
 	idx.mu.Unlock()
 }
 
+// RemoveDocument removes all chunks and summaries for a given document name.
+// It also deletes the corresponding BM25 entries. Thread-safe.
+// Returns the number of chunks removed.
+func (idx *Index) RemoveDocument(docName string) int {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	// Remove chunks from vector store
+	var kept []Chunk
+	var removedIDs []string
+	for _, c := range idx.Chunks {
+		if c.Document == docName {
+			removedIDs = append(removedIDs, c.ID)
+		} else {
+			kept = append(kept, c)
+		}
+	}
+	removed := len(idx.Chunks) - len(kept)
+	idx.Chunks = kept
+
+	// Remove from BM25 index
+	if idx.BM25Index != nil {
+		for _, id := range removedIDs {
+			_ = idx.BM25Index.Delete(id)
+		}
+	}
+
+	// Remove document summaries
+	var keptSummaries []DocumentSummary
+	for _, s := range idx.DocSummaries {
+		if s.Document != docName {
+			keptSummaries = append(keptSummaries, s)
+		}
+	}
+	idx.DocSummaries = keptSummaries
+
+	if removed > 0 {
+		log.Printf("Removed %d chunks and %d summaries for document %q", removed, len(idx.DocSummaries)-len(keptSummaries), docName)
+	}
+
+	return removed
+}
+
 // Close closes the BM25 index. Must be called before opening a different index.
 func (idx *Index) Close() error {
 	if idx.BM25Index != nil {

@@ -125,9 +125,11 @@ function renderIndexedFiles() {
 
     listEl.innerHTML = uploadedFiles.map(f => {
         const ext = f.name.toLowerCase().split('.').pop();
+        const safeName = escapeHtml(f.name).replace(/'/g, "\\'");
         return `<span class="indexed-file-tag">
             <span class="file-ext ${ext}">${ext}</span>
             ${escapeHtml(f.name)}
+            <button class="indexed-file-delete" onclick="event.stopPropagation(); removeFile('${safeName}')" title="Remove document from index">&times;</button>
         </span>`;
     }).join('');
 }
