@@ -1297,6 +1297,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 			Role:    "assistant",
 			Content: answer.Answer,
 			Metadata: map[string]interface{}{
+				"thinking":          answer.Thinking,
 				"documents":         answer.Documents,
 				"pages":             answer.Pages,
 				"footnotes":         answer.Footnotes,

@@ -1409,6 +1409,85 @@ body {
     animation: fadeIn 0.35s ease;
 }
 
+/* Thinking toggle (collapsed by default) */
+.msg-thinking {
+    margin-bottom: 0.75rem;
+}
+
+.msg-thinking-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.msg-thinking-toggle:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.thinking-icon {
+    font-size: 0.85rem;
+    line-height: 1;
+}
+
+.thinking-label {
+    letter-spacing: 0.02em;
+}
+
+.thinking-chevron {
+    font-size: 0.55rem;
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+
+.msg-thinking.open .thinking-chevron {
+    transform: rotate(90deg);
+}
+
+.msg-thinking.open .thinking-label::after {
+    content: none;
+}
+
+.msg-thinking-content {
+    display: none;
+    margin-top: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
+    line-height: 1.65;
+    color: var(--text-secondary);
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.msg-thinking-content::-webkit-scrollbar {
+    width: 3px;
+}
+
+.msg-thinking-content::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+}
+
+.msg-thinking.open .msg-thinking-content {
+    display: block;
+    animation: fadeIn 0.2s ease;
+}
+
 .msg-answer-header {
     display: flex;
     justify-content: space-between;

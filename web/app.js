@@ -354,6 +354,7 @@ async function selectConversation(convId) {
                     const meta = msg.metadata || {};
                     appendAnswer({
                         answer: {
+                            thinking: meta.thinking || '',
                             answer: msg.content,
                             documents: meta.documents || [],
                             pages: meta.pages || [],
@@ -1230,6 +1231,22 @@ function appendAnswer(data) {
     const confColor = conf > 0.8 ? 'var(--success)' : conf > 0.5 ? 'var(--warning)' : 'var(--danger)';
     const confReason = answer.confidence_reason || getDefaultConfidenceReason(conf);
 
+    // Build thinking toggle (collapsed by default)
+    let thinkingHtml = '';
+    if (answer.thinking) {
+        const thinkingText = escapeHtml(answer.thinking).replace(/\n/g, '<br>');
+        thinkingHtml = `
+            <div class="msg-thinking">
+                <button class="msg-thinking-toggle" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="thinking-icon">\uD83E\uDDE0</span>
+                    <span class="thinking-label">Show reasoning</span>
+                    <span class="thinking-chevron">\u25B6</span>
+                </button>
+                <div class="msg-thinking-content">${thinkingText}</div>
+            </div>
+        `;
+    }
+
     const answerDiv = document.createElement('div');
     answerDiv.className = 'msg-answer';
     answerDiv.innerHTML = `
@@ -1237,6 +1254,7 @@ function appendAnswer(data) {
             <span class="msg-answer-label">Answer</span>
             <span class="msg-answer-time">${timeSec} \u2022 ${currentProvider} / ${modelLabel}</span>
         </div>
+        ${thinkingHtml}
         <div class="msg-answer-text">${answerHtml}</div>
         ${footnotesHtml}
         <div class="msg-confidence">

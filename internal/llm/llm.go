@@ -26,6 +26,7 @@ type Footnote struct {
 // Answer represents a structured LLM response
 type Answer struct {
 	Question         string     `json:"question"`
+	Thinking         string     `json:"thinking,omitempty"`
 	Answer           string     `json:"answer"`
 	Documents        []string   `json:"documents"`
 	Pages            []int      `json:"pages"`
@@ -110,12 +111,14 @@ func FormatContext(results []retriever.Result, summaries []indexer.DocumentSumma
 var baseSystemPrompt = `You are a precise document analysis assistant. You will be given a question and relevant excerpts from a corpus of legal, financial, and regulatory documents.
 
 Your task:
-1. Answer the question accurately based ONLY on the provided context
-2. Use inline footnote markers like [1], [2] in your answer to cite specific claims
-3. Be precise — use exact figures, names, and quotes when possible
+1. THINK step-by-step through the question before answering
+2. Answer the question accurately based ONLY on the provided context
+3. Use inline footnote markers like [1], [2] in your answer to cite specific claims
+4. Be precise — use exact figures, names, and quotes when possible
 
 Respond in this exact JSON format:
 {
+  "thinking": "Let me analyze the question step by step. First, I need to... [your reasoning process here]",
   "answer": "The revenue was $50B[1] with growth of 12%[2].",
   "footnotes": [
     {"id": 1, "document": "doc1.pdf", "page": 3},
@@ -125,15 +128,23 @@ Respond in this exact JSON format:
   "confidence_reason": "Exact figures found in two source documents"
 }
 
-Rules:
+Thinking rules:
+- In the "thinking" field, reason through the problem step by step
+- Identify which sources are relevant and why
+- For counting/listing questions: go through EVERY source one by one and track what you find
+- For numerical questions: locate the exact figure and verify the label matches what was asked
+- Cross-check your findings before writing the final answer
+- The thinking field is shown to users who want to verify your reasoning
+
+Answer rules:
 - Place [N] markers inline where a specific fact comes from that source
 - Each footnote has an id (matching the marker), document name, and page number
 - confidence is 0.0 to 1.0 based on how well the context answers the question
 - confidence_reason is a brief explanation (1 sentence) of why the score is what it is
 - If the answer cannot be found in the context, set confidence = 0.0
-- For questions asking to LIST, COUNT, or NAME items: exhaustively scan EVERY source excerpt provided. Do not stop early — check ALL provided sources even if you already found some matches. Count carefully and verify the total.
+- For questions asking to LIST, COUNT, or NAME items: exhaustively scan EVERY source excerpt provided. Do not stop early. Count carefully and verify the total.
 - Use exact figures, labels, and terminology from the source documents. Prefer the specific wording in the document (e.g. if a document says "Rs. 4,586,550,000" use that exact figure, not a converted or rounded version)
-- When multiple documents are relevant, cross-reference ALL of them before forming your answer. A source may contain relevant information even if its title does not obviously match the question
+- When multiple documents are relevant, cross-reference ALL of them before forming your answer
 
 Also keep the legacy fields for backward compatibility:
 - "documents": array of all cited document names
@@ -306,6 +317,7 @@ func parseAnswer(rawText string, question string) (*Answer, error) {
 	rawText = strings.TrimSpace(rawText)
 
 	var parsed struct {
+		Thinking         string     `json:"thinking"`
 		Answer           string     `json:"answer"`
 		Documents        []string   `json:"documents"`
 		Pages            []int      `json:"pages"`
@@ -331,6 +343,7 @@ func parseAnswer(rawText string, question string) (*Answer, error) {
 
 	return &Answer{
 		Question:         question,
+		Thinking:         parsed.Thinking,
 		Answer:           answerText,
 		Documents:        parsed.Documents,
 		Pages:            parsed.Pages,
