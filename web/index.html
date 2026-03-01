@@ -467,9 +467,18 @@
     <!-- Footer -->
     <footer class="footer">
         <span>Built with Go • Hybrid RAG • Multi-Provider LLM</span>
-        <span class="footer-accent">GoCognigo <span class="footer-version">v0.1.1</span></span>
+        <span class="footer-accent">GoCognigo <span class="footer-version">v0.1.2</span></span>
     </footer>
 
+    <!-- Module scripts (loaded in dependency order) -->
+    <script src="state.js"></script>
+    <script src="utils.js"></script>
+    <script src="ui.js"></script>
+    <script src="projects.js"></script>
+    <script src="conversations.js"></script>
+    <script src="files.js"></script>
+    <script src="ingest.js"></script>
+    <script src="query.js"></script>
     <script src="app.js"></script>
 </body>
 
