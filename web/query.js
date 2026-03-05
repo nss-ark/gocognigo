@@ -1,4 +1,64 @@
-// === GoCognigo — Query, Batch, Settings, Providers ===
+// ===== Loader helpers =====
+
+const LOADER_MESSAGES = [
+    'Searching documents\u2026',
+    'Reasoning across corpus\u2026',
+    'Generating answer\u2026',
+    'Analyzing sources\u2026'
+];
+
+function showQueryLoader() {
+    const btn = document.getElementById('submitBtn');
+    const hint = document.getElementById('queryStatusHint');
+    btn.classList.add('loading');
+    btn.onclick = cancelQuery;
+
+    // Show subtle cycling text below input
+    let idx = 0;
+    hint.textContent = LOADER_MESSAGES[0];
+    hint.classList.remove('hidden');
+    loaderTextInterval = setInterval(() => {
+        idx = (idx + 1) % LOADER_MESSAGES.length;
+        hint.style.opacity = '0';
+        setTimeout(() => {
+            hint.textContent = LOADER_MESSAGES[idx];
+            hint.style.opacity = '0.6';
+        }, 200);
+    }, 3000);
+}
+
+function hideQueryLoader() {
+    const btn = document.getElementById('submitBtn');
+    const hint = document.getElementById('queryStatusHint');
+    btn.classList.remove('loading');
+    btn.onclick = submitQuery;
+    hint.classList.add('hidden');
+    if (loaderTextInterval) {
+        clearInterval(loaderTextInterval);
+        loaderTextInterval = null;
+    }
+}
+
+function cancelQuery() {
+    if (activeQueryController) {
+        activeQueryController.abort();
+        activeQueryController = null;
+    }
+    hideQueryLoader();
+
+    // Show cancellation message in thread
+    const thread = document.getElementById('conversationThread');
+    const cancelDiv = document.createElement('div');
+    cancelDiv.className = 'msg-answer';
+    cancelDiv.innerHTML = `
+        <div class="msg-answer-header">
+            <span class="msg-answer-label" style="color:var(--text-muted)">Stopped</span>
+        </div>
+        <div class="msg-answer-text" style="color:var(--text-muted); font-style:italic">Generation stopped.</div>
+    `;
+    thread.appendChild(cancelDiv);
+    scrollThread();
+}
 
 // ===== Single Query =====
 
@@ -8,27 +68,28 @@ async function submitQuery() {
     if (!question) return;
 
     const thread = document.getElementById('conversationThread');
-    const loading = document.getElementById('loadingIndicator');
 
-    // Append user question bubble to thread
+    // Append user question bubble
     const qDiv = document.createElement('div');
     qDiv.className = 'msg-question';
     qDiv.textContent = question;
     thread.appendChild(qDiv);
 
-    // Clear input for next question
     input.value = '';
 
-    // Show loading inside thread
-    loading.classList.remove('hidden');
+    // Activate loading state on the send button
+    showQueryLoader();
     scrollThread();
 
+    // Create AbortController
+    activeQueryController = new AbortController();
+
     try {
-        // Use streaming endpoint
         const res = await fetch(`${API_BASE}/api/query/stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, provider: currentProvider, model: currentModel, project_id: activeProjectId, conversation_id: activeConversationId })
+            body: JSON.stringify({ question, provider: currentProvider, model: currentModel, project_id: activeProjectId, conversation_id: activeConversationId }),
+            signal: activeQueryController.signal
         });
 
         if (!res.ok) {
@@ -36,12 +97,84 @@ async function submitQuery() {
             throw new Error(errData.error || 'Request failed');
         }
 
-        loading.classList.add('hidden');
+        // DON'T hide loader yet — keep it active through the thinking phase.
+        // The bubble is lazily created when the first text token arrives.
+        let answerDiv = null;
+        let textEl = null;
+        const streamState = {
+            rawText: '',
+            thinkingText: '',
+            enhancedQuestion: null,
+            finalAnswer: null,
+            timeSeconds: 0,
+        };
 
-        // Create the answer bubble shell for streaming
-        const { answerDiv, textEl, streamState } = createStreamBubble();
-        thread.appendChild(answerDiv);
-        scrollThread();
+        // Lazily create the answer bubble on first text token
+        function ensureBubble() {
+            if (answerDiv) return;
+            hideQueryLoader();
+            const result = createStreamBubble();
+            answerDiv = result.answerDiv;
+            textEl = result.textEl;
+            // Copy already-accumulated state into the new bubble's streamState
+            Object.assign(result.streamState, streamState);
+            thread.appendChild(answerDiv);
+            scrollThread();
+        }
+
+        // Throttled markdown re-render during streaming
+        let renderTimer = null;
+
+        // Extract only the "answer" content from JSON-structured model output
+        function extractAnswerFromStream(text) {
+            const trimmed = text.trimStart();
+            if (!trimmed.startsWith('{')) return text; // Not JSON, passthrough
+
+            // Look for "answer" : "..." and extract content after it
+            const marker = /"answer"\s*:\s*"/;
+            const match = marker.exec(trimmed);
+            if (!match) return ''; // JSON structure but answer field not yet reached
+
+            const afterMarker = trimmed.slice(match.index + match[0].length);
+            // The answer value runs until an unescaped quote — but since
+            // streaming is incomplete, we just take everything we have so far
+            // and unescape JSON string escapes
+            let content = afterMarker;
+            // If the JSON is complete, trim the trailing " and remaining JSON
+            const closingQuote = findUnescapedQuote(content);
+            if (closingQuote >= 0) {
+                content = content.slice(0, closingQuote);
+            }
+            // Unescape JSON string escapes
+            content = content.replace(/\\n/g, '\n')
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, '\\')
+                .replace(/\\t/g, '\t');
+            return content;
+        }
+
+        // Find the first unescaped double quote in a string
+        function findUnescapedQuote(s) {
+            for (let i = 0; i < s.length; i++) {
+                if (s[i] === '\\') { i++; continue; } // skip escaped char
+                if (s[i] === '"') return i;
+            }
+            return -1;
+        }
+
+        const scheduleRender = () => {
+            if (renderTimer) return;
+            renderTimer = setTimeout(() => {
+                renderTimer = null;
+                if (!textEl) return;
+                const displayText = extractAnswerFromStream(streamState.rawText);
+                if (!displayText) return; // Nothing to show yet
+                let html = renderMarkdown(displayText);
+                html = html.replace(/\[(\d+)\]/g, (m, n) => `<span class="footnote-ref">${n}</span>`);
+                textEl.innerHTML = html;
+                scrollThread();
+            }, 150);
+        };
 
         // Read SSE stream
         const reader = res.body.getReader();
@@ -54,7 +187,7 @@ async function submitQuery() {
 
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
-            buffer = lines.pop(); // keep incomplete line in buffer
+            buffer = lines.pop();
 
             for (const line of lines) {
                 if (!line.startsWith('data: ')) continue;
@@ -65,12 +198,13 @@ async function submitQuery() {
 
                     switch (event.type) {
                         case 'text':
+                            ensureBubble();
                             streamState.rawText += event.token;
-                            textEl.textContent += event.token;
-                            scrollThread();
+                            scheduleRender();
                             break;
 
                         case 'thinking':
+                            // Accumulate silently — loader stays active
                             streamState.thinkingText += event.token;
                             break;
 
@@ -89,8 +223,8 @@ async function submitQuery() {
                             break;
 
                         case 'error':
-                            textEl.textContent = 'Error: ' + (event.error || 'Unknown streaming error');
-                            textEl.style.color = 'var(--danger)';
+                            ensureBubble();
+                            textEl.innerHTML = '<span style="color:var(--danger)">Error: ' + escapeHtml(event.error || 'Unknown streaming error') + '</span>';
                             break;
                     }
                 } catch (e) {
@@ -99,19 +233,31 @@ async function submitQuery() {
             }
         }
 
+        // Cancel any pending render timer
+        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+
+        // If no text tokens were received at all (edge case), ensure the bubble exists
+        ensureBubble();
+
         // Finalize the answer bubble with full formatting
         finalizeStreamAnswer(answerDiv, streamState, question);
 
-        // Auto-name the conversation from the first question
+        // Auto-name the conversation
         autoNameConversation(question);
     } catch (e) {
-        loading.classList.add('hidden');
+        hideQueryLoader();
+        activeQueryController = null;
+
+        if (e.name === 'AbortError') return;
+
         const errDiv = document.createElement('div');
         errDiv.className = 'msg-answer';
         errDiv.innerHTML = `<div class="msg-answer-header"><span class="msg-answer-label" style="color:var(--danger)">Error</span></div><div class="msg-answer-text" style="color:var(--danger)">${escapeHtml(e.message)}</div>`;
         thread.appendChild(errDiv);
         scrollThread();
     }
+
+    activeQueryController = null;
 }
 
 function createStreamBubble() {
@@ -126,7 +272,7 @@ function createStreamBubble() {
         </div>
         <div data-stream-enhanced style="display:none"></div>
         <div data-stream-thinking style="display:none"></div>
-        <div class="msg-answer-text" data-stream-text style="white-space:pre-wrap"></div>
+        <div class="msg-answer-text" data-stream-text></div>
         <div data-stream-footnotes style="display:none"></div>
         <div class="msg-confidence" data-stream-confidence style="display:none"></div>
     `;
@@ -162,9 +308,6 @@ function finalizeStreamAnswer(answerDiv, streamState, originalQuestion) {
         enhancedEl.innerHTML = `<div class="msg-enhanced-query" title="Your question was expanded for better search results">\uD83D\uDD0D Searched as: <em>${escapeHtml(streamState.enhancedQuestion)}</em></div>`;
         enhancedEl.style.display = '';
     }
-
-    // Remove inline white-space style now that we're rendering HTML
-    textEl.style.whiteSpace = '';
 
     // Re-render with markdown
     if (answer) {
@@ -364,11 +507,10 @@ async function runBatch() {
     const btn = document.getElementById('runBatchBtn');
     btn.disabled = true;
 
-    const loading = document.getElementById('loadingIndicator');
     const batchResults = document.getElementById('batchResults');
     batchResults.classList.add('hidden');
     batchResults.innerHTML = '';
-    loading.classList.remove('hidden');
+    showQueryLoader();
 
     const startTime = performance.now();
     timerInterval = setInterval(() => {
@@ -399,11 +541,11 @@ async function runBatch() {
         document.getElementById('timerValue').textContent = `${elapsed.toFixed(2)}s`;
         document.getElementById('timerFill').style.width = `${Math.min((elapsed / 30) * 100, 100)}%`;
 
-        loading.classList.add('hidden');
+        hideQueryLoader();
         renderBatchResults(data);
     } catch (e) {
         clearInterval(timerInterval);
-        loading.classList.add('hidden');
+        hideQueryLoader();
         alert('Error: ' + e.message);
     }
 

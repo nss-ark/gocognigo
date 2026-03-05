@@ -386,24 +386,23 @@
                         <!-- Q&A messages rendered by JS -->
                     </div>
 
-                    <!-- Loading indicator (inline in thread) -->
-                    <div class="loading hidden" id="loadingIndicator">
-                        <div class="spinner"></div>
-                        <span>Reasoning across the corpus...</span>
-                    </div>
-
                     <!-- Input always at the bottom -->
                     <div class="query-input-wrap">
                         <textarea id="queryInput" placeholder="Ask a question about your documents..."
                             rows="2"></textarea>
                         <button class="submit-btn" id="submitBtn" onclick="submitQuery()">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
+                            <svg class="send-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2">
                                 <line x1="22" y1="2" x2="11" y2="13" />
                                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
                             </svg>
+                            <svg class="stop-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"
+                                style="display:none">
+                                <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+                            </svg>
                         </button>
                     </div>
+                    <div class="query-status-hint hidden" id="queryStatusHint"></div>
                 </section>
 
                 <!-- Batch panel -->

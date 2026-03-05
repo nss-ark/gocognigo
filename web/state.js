@@ -31,3 +31,5 @@ let availableProviders = [];
 let providerModels = {};
 let timerInterval = null;
 let ingestPollInterval = null;
+let activeQueryController = null;
+let loaderTextInterval = null;
