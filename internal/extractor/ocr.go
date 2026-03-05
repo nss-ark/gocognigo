@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ledongthuc/pdf"
 )
 
 // OCRConfig controls which OCR provider to use for scanned PDFs.
@@ -150,8 +152,42 @@ func RunOCR(cfg OCRConfig, pdfPath string) ([]DocumentChunk, error) {
 // Initialized to the number of CPU cores.
 var tesseractSem = make(chan struct{}, runtime.NumCPU())
 
+// pdfPageCount returns the number of pages in a PDF using pdftoppm's quick probe.
+// Falls back to trying the Go PDF library if pdftoppm is not available.
+func pdfPageCount(pdfPath string) (int, error) {
+	// Try pdfinfo (comes with Poppler) — fastest way to get page count
+	if pdfinfoPath, err := exec.LookPath("pdfinfo"); err == nil {
+		cmd := exec.Command(pdfinfoPath, pdfPath)
+		out, err := cmd.Output()
+		if err == nil {
+			re := regexp.MustCompile(`Pages:\s+(\d+)`)
+			m := re.FindSubmatch(out)
+			if len(m) >= 2 {
+				n, _ := strconv.Atoi(string(m[1]))
+				if n > 0 {
+					return n, nil
+				}
+			}
+		}
+	}
+
+	// Fallback: convert just page 1 and count how many images pdftoppm generates
+	// with a single-page range — this at least tells us the tool works.
+	// For actual count, we try the Go PDF library.
+	f, r, err := pdf.Open(pdfPath)
+	if err == nil {
+		defer f.Close()
+		return r.NumPage(), nil
+	}
+
+	// Last resort: return 0 to signal unknown (caller will process without batching)
+	return 0, fmt.Errorf("cannot determine page count: %w", err)
+}
+
 // tesseractOCR runs Tesseract on a PDF by first converting it to images.
-// It limits concurrency across all active extractions to prevent CPU thrashing.
+// For large documents (>50 pages), it processes in batches to avoid
+// exhausting disk space and memory. It limits concurrency across all
+// active extractions to prevent CPU thrashing.
 func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 	bin := tesseractBin
 	if bin == "" {
@@ -164,7 +200,52 @@ func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 	tesseractDir := filepath.Dir(bin)
 	tessDataPrefix := filepath.Join(tesseractDir, "tessdata")
 
-	// Create temp directory for images
+	// Determine page count to decide if batching is needed
+	totalPages, pgErr := pdfPageCount(pdfPath)
+
+	const batchSize = 50
+
+	// If we can't determine page count or it's small, process all at once (original behavior)
+	if pgErr != nil || totalPages <= batchSize {
+		return tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix, 0, 0)
+	}
+
+	// Large document: process in batches of batchSize pages
+	log.Printf("Large document detected: %s has %d pages, processing in batches of %d", fileName, totalPages, batchSize)
+
+	var allChunks []DocumentChunk
+	for startPage := 1; startPage <= totalPages; startPage += batchSize {
+		endPage := startPage + batchSize - 1
+		if endPage > totalPages {
+			endPage = totalPages
+		}
+
+		log.Printf("Processing %s: pages %d–%d of %d", fileName, startPage, endPage, totalPages)
+		batchChunks, err := tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix, startPage, endPage)
+		if err != nil {
+			log.Printf("Batch %d–%d failed for %s: %v (continuing with remaining batches)", startPage, endPage, fileName, err)
+			continue // don't fail the whole document for one bad batch
+		}
+		allChunks = append(allChunks, batchChunks...)
+	}
+
+	if len(allChunks) == 0 {
+		return nil, fmt.Errorf("tesseract OCR extracted no text from %s (%d pages)", fileName, totalPages)
+	}
+
+	// Sort by page number
+	sort.Slice(allChunks, func(i, j int) bool {
+		return allChunks[i].PageNumber < allChunks[j].PageNumber
+	})
+
+	log.Printf("Tesseract OCR extracted %d pages from %s (batched, %d total pages)", len(allChunks), fileName, totalPages)
+	return allChunks, nil
+}
+
+// tesseractOCRRange converts and OCRs a range of pages from a PDF.
+// If firstPage/lastPage are both 0, it processes the entire PDF at once.
+func tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix string, firstPage, lastPage int) ([]DocumentChunk, error) {
+	// Create temp directory for images (cleaned up after each batch)
 	tmpDir, err := os.MkdirTemp("", "gocognigo-ocr-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
@@ -178,12 +259,22 @@ func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 
 	// Try pdftoppm (Poppler) first — best quality, fastest
 	if pdftoppmPath, lookErr := exec.LookPath("pdftoppm"); lookErr == nil {
-		cmd := exec.Command(pdftoppmPath, "-png", "-r", "200", pdfPath, imagePrefix)
+		args := []string{"-png", "-r", "200"}
+		if firstPage > 0 && lastPage > 0 {
+			args = append(args, "-f", strconv.Itoa(firstPage), "-l", strconv.Itoa(lastPage))
+		}
+		args = append(args, pdfPath, imagePrefix)
+
+		cmd := exec.Command(pdftoppmPath, args...)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err == nil {
 			converted = true
-			log.Printf("Converted %s to images using pdftoppm", fileName)
+			if firstPage > 0 {
+				log.Printf("Converted %s pages %d–%d to images using pdftoppm", fileName, firstPage, lastPage)
+			} else {
+				log.Printf("Converted %s to images using pdftoppm", fileName)
+			}
 		} else {
 			convertErr = fmt.Errorf("pdftoppm: %v (stderr: %s)", err, stderr.String())
 		}
@@ -192,12 +283,23 @@ func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 	// Try ImageMagick as fallback
 	if !converted {
 		if magickPath, lookErr := exec.LookPath("magick"); lookErr == nil {
-			cmd := exec.Command(magickPath, "convert", "-density", "200", pdfPath, imagePrefix+"-%03d.png")
+			var pdfArg string
+			if firstPage > 0 && lastPage > 0 {
+				// ImageMagick uses 0-based page indices
+				pdfArg = fmt.Sprintf("%s[%d-%d]", pdfPath, firstPage-1, lastPage-1)
+			} else {
+				pdfArg = pdfPath
+			}
+			cmd := exec.Command(magickPath, "convert", "-density", "200", pdfArg, imagePrefix+"-%03d.png")
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			if err := cmd.Run(); err == nil {
 				converted = true
-				log.Printf("Converted %s to images using ImageMagick", fileName)
+				if firstPage > 0 {
+					log.Printf("Converted %s pages %d–%d to images using ImageMagick", fileName, firstPage, lastPage)
+				} else {
+					log.Printf("Converted %s to images using ImageMagick", fileName)
+				}
 			} else {
 				convertErr = fmt.Errorf("magick: %v (stderr: %s)", err, stderr.String())
 			}
@@ -227,6 +329,12 @@ func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 	var chunkMu sync.Mutex
 	var firstErrLogged sync.Once
 
+	// Determine the base page number for this batch
+	basePageNum := 1
+	if firstPage > 0 {
+		basePageNum = firstPage
+	}
+
 	var wg sync.WaitGroup
 	for i, imgFile := range imageFiles {
 		wg.Add(1)
@@ -237,7 +345,7 @@ func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 			tesseractSem <- struct{}{}
 			defer func() { <-tesseractSem }()
 
-			pageNum := idx + 1
+			pageNum := basePageNum + idx
 			cmd := exec.Command(bin, file, "stdout", "-l", "eng", "--psm", "6")
 			cmd.Env = append(os.Environ(),
 				"TESSDATA_PREFIX="+tessDataPrefix,
@@ -275,11 +383,13 @@ func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 		return chunks[i].PageNumber < chunks[j].PageNumber
 	})
 
-	if len(chunks) == 0 {
+	if len(chunks) == 0 && firstPage == 0 {
 		return nil, fmt.Errorf("tesseract OCR extracted no text from %s", fileName)
 	}
 
-	log.Printf("Tesseract OCR extracted %d pages from %s", len(chunks), fileName)
+	if firstPage == 0 {
+		log.Printf("Tesseract OCR extracted %d pages from %s", len(chunks), fileName)
+	}
 	return chunks, nil
 }
 

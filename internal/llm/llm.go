@@ -8,7 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
+	"time"
 
 	"gocognigo/internal/indexer"
 	"gocognigo/internal/retriever"
@@ -37,7 +39,7 @@ type Answer struct {
 
 // Provider defines the interface for different LLM backends
 type Provider interface {
-	AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary) (*Answer, error)
+	AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage) (*Answer, error)
 }
 
 // NewProvider creates the appropriate LLM provider based on config
@@ -146,6 +148,17 @@ Answer rules:
 - Use exact figures, labels, and terminology from the source documents. Prefer the specific wording in the document (e.g. if a document says "Rs. 4,586,550,000" use that exact figure, not a converted or rounded version)
 - When multiple documents are relevant, cross-reference ALL of them before forming your answer
 
+Legal & regulatory citation rules:
+- When your answer references or relies on a legal provision, regulation, statute, rule, circular, notification, or any regulatory document, you MUST cite the specific section, clause, sub-clause, rule number, or regulation number inline immediately after the relevant sentence or paragraph.
+- Format: include the provision in parentheses right after the claim, e.g. "The company must file within 30 days (Section 139(1) of the Companies Act, 2013)[1]" or "This is governed by Regulation 30 of the SEBI (LODR) Regulations, 2015[2]."
+- If the source excerpt mentions a specific section or provision number, always reproduce it in your answer — never omit it.
+- For multiple provisions in the same paragraph, cite each one inline where it is discussed rather than grouping them at the end.
+
+Conversation context:
+- You may receive prior conversation messages (user questions and assistant answers) for context.
+- Use them to understand references like "it", "that document", "the same company", "this section", etc.
+- Always prioritise the document excerpts provided for factual answers — conversation history is for reference resolution only.
+
 Also keep the legacy fields for backward compatibility:
 - "documents": array of all cited document names
 - "pages": array of corresponding page numbers`
@@ -166,39 +179,87 @@ type OpenAIProvider struct {
 	model  string
 }
 
-func (p *OpenAIProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary) (*Answer, error) {
+func (p *OpenAIProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage) (*Answer, error) {
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("**Question:** %s\n\n**Context:**\n\n%s", question, contextStr)
+
+	// Build message list with conversation history
+	historyMsgs := buildHistoryMessages(history)
 
 	var resp openai.ChatCompletionResponse
 	var err error
 
-	if isReasoningModel(p.model) {
-		// Reasoning models (o1, o3, o4 series) reject temperature, top_p,
-		// and response_format. Go's zero-value for float32 is 0 which the
-		// API interprets as an explicit value, so we must not set it at all.
-		// Also use MaxCompletionTokens instead of MaxTokens.
-		resp, err = p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-			Model: p.model,
-			Messages: []openai.ChatCompletionMessage{
+	// Retry logic for rate limits (429) and server errors (5xx)
+	for attempt := 0; attempt < 5; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		if isReasoningModel(p.model) {
+			// Reasoning models (o1, o3, o4 series) reject temperature, top_p,
+			// and response_format. Go's zero-value for float32 is 0 which the
+			// API interprets as an explicit value, so we must not set it at all.
+			// Also use MaxCompletionTokens instead of MaxTokens.
+			msgs := []openai.ChatCompletionMessage{
 				{Role: openai.ChatMessageRoleSystem, Content: baseSystemPrompt},
-				{Role: openai.ChatMessageRoleUser, Content: userPrompt},
-			},
-			MaxCompletionTokens: 4096,
-		})
-	} else {
-		resp, err = p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-			Model: p.model,
-			Messages: []openai.ChatCompletionMessage{
+			}
+			msgs = append(msgs, historyMsgs...)
+			msgs = append(msgs, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: userPrompt})
+			resp, err = p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+				Model:               p.model,
+				Messages:            msgs,
+				MaxCompletionTokens: 4096,
+			})
+		} else {
+			msgs := []openai.ChatCompletionMessage{
 				{Role: openai.ChatMessageRoleSystem, Content: baseSystemPrompt},
-				{Role: openai.ChatMessageRoleUser, Content: userPrompt},
-			},
-			Temperature:    0.1,
-			ResponseFormat: &openai.ChatCompletionResponseFormat{Type: openai.ChatCompletionResponseFormatTypeJSONObject},
-		})
-	}
-	if err != nil {
+			}
+			msgs = append(msgs, historyMsgs...)
+			msgs = append(msgs, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: userPrompt})
+			resp, err = p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+				Model:          p.model,
+				Messages:       msgs,
+				Temperature:    0.1,
+				ResponseFormat: &openai.ChatCompletionResponseFormat{Type: openai.ChatCompletionResponseFormatTypeJSONObject},
+			})
+		}
+
+		if err == nil {
+			break // Success
+		}
+
+		// Check if it's a retriable error (429 Too Many Requests or 5xx Server Error)
+		shouldRetry := false
+		if apiErr, ok := err.(*openai.APIError); ok {
+			if apiErr.HTTPStatusCode == 429 || apiErr.HTTPStatusCode >= 500 {
+				shouldRetry = true
+			}
+		} else if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "500") || strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "504") {
+			shouldRetry = true
+		}
+
+		if shouldRetry {
+			wait := time.Duration(2*(1<<uint(attempt))) * time.Second
+			if wait > 20*time.Second {
+				wait = 20 * time.Second
+			}
+			log.Printf("OpenAI API error %v (attempt %d/5), retrying in %v...", err, attempt+1, wait)
+
+			timer := time.NewTimer(wait)
+			select {
+			case <-timer.C:
+				continue
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			}
+		}
+
 		return nil, fmt.Errorf("openai error: %w", err)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("openai api failed after retries: %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
@@ -216,37 +277,74 @@ type HuggingFaceProvider struct {
 	model  string
 }
 
-func (p *HuggingFaceProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary) (*Answer, error) {
+func (p *HuggingFaceProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage) (*Answer, error) {
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("Question: %s\n\nContext:\n%s", question, contextStr)
 
+	// Build messages with history
+	messages := []map[string]string{
+		{"role": "system", "content": baseSystemPrompt},
+	}
+	for _, msg := range trimHistory(history) {
+		messages = append(messages, map[string]string{"role": msg.Role, "content": msg.Content})
+	}
+	messages = append(messages, map[string]string{"role": "user", "content": userPrompt})
+
 	reqBody, _ := json.Marshal(map[string]interface{}{
-		"model": p.model,
-		"messages": []map[string]string{
-			{"role": "system", "content": baseSystemPrompt},
-			{"role": "user", "content": userPrompt},
-		},
+		"model":       p.model,
+		"messages":    messages,
 		"max_tokens":  2048,
 		"temperature": 0.1,
 		"stream":      false,
 	})
 
 	url := "https://router.huggingface.co/v1/chat/completions"
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
+	var resp *http.Response
+	var err error
 	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("huggingface req error: %w", err)
-	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	// Retry logic for rate limits (429) and server errors (5xx)
+	for attempt := 0; attempt < 5; attempt++ {
+		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err = client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("huggingface req error: %w", err)
+		}
+
+		if resp.StatusCode == 200 {
+			break
+		}
+
 		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+			wait := time.Duration(2*(1<<uint(attempt))) * time.Second
+			if wait > 20*time.Second {
+				wait = 20 * time.Second
+			}
+			log.Printf("HuggingFace API error %d (attempt %d/5), retrying in %v...", resp.StatusCode, attempt+1, wait)
+
+			timer := time.NewTimer(wait)
+			select {
+			case <-timer.C:
+				continue
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			}
+		}
+
 		return nil, fmt.Errorf("huggingface api error: %d - %s", resp.StatusCode, string(bodyBytes))
 	}
+
+	if resp == nil || resp.StatusCode != 200 {
+		return nil, fmt.Errorf("huggingface api failed after retries")
+	}
+	defer resp.Body.Close()
 
 	var chatResp struct {
 		Choices []struct {
@@ -274,35 +372,77 @@ type AnthropicProvider struct {
 	model  string
 }
 
-func (p *AnthropicProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary) (*Answer, error) {
+func (p *AnthropicProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage) (*Answer, error) {
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("Question: %s\n\nContext:\n%s", question, contextStr)
 
+	// Build messages with history
+	anthMessages := []map[string]string{}
+	for _, msg := range trimHistory(history) {
+		anthMessages = append(anthMessages, map[string]string{"role": msg.Role, "content": msg.Content})
+	}
+	anthMessages = append(anthMessages, map[string]string{"role": "user", "content": userPrompt})
+
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"model":       p.model,
-		"max_tokens":  2048,
+		"max_tokens":  4096,
 		"temperature": 0.1,
 		"system":      baseSystemPrompt,
-		"messages": []map[string]string{
-			{"role": "user", "content": userPrompt},
-		},
+		"messages":    anthMessages,
 	})
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(reqBody))
-	req.Header.Set("x-api-key", p.apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("content-type", "application/json")
-
+	var resp *http.Response
+	var err error
 	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic req error: %w", err)
+
+	// Retry logic for rate limits (429) and overloaded (529) errors
+	for attempt := 0; attempt < 5; attempt++ {
+		req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(reqBody))
+		req.Header.Set("x-api-key", p.apiKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+		req.Header.Set("content-type", "application/json")
+
+		resp, err = client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("anthropic req error: %w", err)
+		}
+
+		if resp.StatusCode == 200 {
+			break
+		}
+
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == 429 || resp.StatusCode == 529 {
+			wait := time.Duration(2*(1<<uint(attempt))) * time.Second
+			if wait > 20*time.Second {
+				wait = 20 * time.Second
+			}
+			log.Printf("Anthropic API error %d (attempt %d/5), retrying in %v...", resp.StatusCode, attempt+1, wait)
+
+			timer := time.NewTimer(wait)
+			select {
+			case <-timer.C:
+				continue
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			}
+		}
+
+		return nil, fmt.Errorf("anthropic api error: %d - %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	if resp == nil || resp.StatusCode != 200 {
+		return nil, fmt.Errorf("anthropic api failed after retries")
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("anthropic api error: %d - %s", resp.StatusCode, string(bodyBytes))
+	// Read raw body first for diagnostic logging
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: failed to read response body: %w", err)
 	}
 
 	var anthResp struct {
@@ -310,29 +450,102 @@ func (p *AnthropicProvider) AnswerQuestion(ctx context.Context, question string,
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		StopReason string `json:"stop_reason"`
+		Usage      struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+		Error *struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&anthResp); err != nil {
+	if err := json.Unmarshal(rawBody, &anthResp); err != nil {
+		log.Printf("Anthropic raw body (first 500 chars): %.500s", string(rawBody))
 		return nil, fmt.Errorf("anthropic json decode error: %w", err)
 	}
 
+	// Check for API-level error in response body
+	if anthResp.Error != nil {
+		return nil, fmt.Errorf("anthropic api error: %s - %s", anthResp.Error.Type, anthResp.Error.Message)
+	}
+
 	if len(anthResp.Content) == 0 {
-		return nil, fmt.Errorf("anthropic empty response")
+		log.Printf("Anthropic empty content. stop_reason=%s, usage: in=%d out=%d, raw body (first 500): %.500s",
+			anthResp.StopReason, anthResp.Usage.InputTokens, anthResp.Usage.OutputTokens, string(rawBody))
+		return nil, fmt.Errorf("anthropic empty response (stop_reason: %s)", anthResp.StopReason)
+	}
+
+	// Log if response was truncated — helps debug missing output
+	if anthResp.StopReason == "max_tokens" {
+		log.Printf("WARNING: Anthropic response truncated (stop_reason=max_tokens, output_tokens=%d) for model %s",
+			anthResp.Usage.OutputTokens, p.model)
 	}
 
 	// Concatenate all text blocks (some models return multiple content blocks)
 	var fullText string
+	var thinkingText string
 	for _, block := range anthResp.Content {
-		if block.Type == "" || block.Type == "text" {
+		switch block.Type {
+		case "", "text":
 			fullText += block.Text
+		case "thinking":
+			thinkingText += block.Text
 		}
 	}
 
-	if fullText == "" {
-		return nil, fmt.Errorf("anthropic: no text content in response")
+	// Log block types for debugging when output looks problematic
+	log.Printf("Anthropic response: %d blocks, stop_reason=%s, output_tokens=%d, text_len=%d, thinking_len=%d",
+		len(anthResp.Content), anthResp.StopReason, anthResp.Usage.OutputTokens, len(fullText), len(thinkingText))
+
+	// If no text blocks but we have thinking blocks, use thinking as fallback
+	if strings.TrimSpace(fullText) == "" && strings.TrimSpace(thinkingText) != "" {
+		log.Printf("Anthropic: text blocks empty, using thinking block content as fallback (model: %s)", p.model)
+		fullText = thinkingText
 	}
 
-	log.Printf("Anthropic raw response (first 200 chars): %.200s", fullText)
+	if strings.TrimSpace(fullText) == "" {
+		// Log all block types and dump raw body for debugging
+		var types []string
+		for _, block := range anthResp.Content {
+			types = append(types, fmt.Sprintf("type=%q len=%d text=%.50s", block.Type, len(block.Text), block.Text))
+		}
+		log.Printf("Anthropic empty text! blocks: [%s], raw body (first 500): %.500s", strings.Join(types, ", "), string(rawBody))
+		return nil, fmt.Errorf("anthropic: no text content in response (stop_reason: %s, blocks: %d)", anthResp.StopReason, len(anthResp.Content))
+	}
+
 	return parseAnswer(fullText, question)
+}
+
+// maxHistoryPairs is the number of recent Q&A exchanges to include.
+const maxHistoryPairs = 5
+
+// trimHistory returns the last maxHistoryPairs exchanges from the history.
+func trimHistory(history []ChatMessage) []ChatMessage {
+	max := maxHistoryPairs * 2 // each exchange = 1 user + 1 assistant
+	if len(history) <= max {
+		return history
+	}
+	return history[len(history)-max:]
+}
+
+// buildHistoryMessages converts ChatMessage history into OpenAI message format.
+func buildHistoryMessages(history []ChatMessage) []openai.ChatCompletionMessage {
+	trimmed := trimHistory(history)
+	var msgs []openai.ChatCompletionMessage
+	for _, h := range trimmed {
+		role := openai.ChatMessageRoleUser
+		if h.Role == "assistant" {
+			role = openai.ChatMessageRoleAssistant
+		}
+		// Truncate long assistant answers to conserve tokens
+		content := h.Content
+		if h.Role == "assistant" && len(content) > 500 {
+			content = content[:500] + "... [truncated]"
+		}
+		msgs = append(msgs, openai.ChatCompletionMessage{Role: role, Content: content})
+	}
+	return msgs
 }
 
 // Helper to parse JSON from LLM text
@@ -361,7 +574,33 @@ func parseAnswer(rawText string, question string) (*Answer, error) {
 	}
 	if err := json.Unmarshal([]byte(rawText), &parsed); err != nil {
 		log.Printf("parseAnswer JSON error: %v (first 200 chars: %.200s)", err, rawText)
-		// JSON parse failed — return the raw text as the answer
+
+		// JSON parse failed — try to extract partial "answer" field with regex
+		// This handles truncated JSON from max_tokens cutoff
+		answerRe := regexp.MustCompile(`"answer"\s*:\s*"((?:[^"\\]|\\.)*)`)
+		if m := answerRe.FindStringSubmatch(rawText); len(m) >= 2 {
+			partialAnswer := strings.ReplaceAll(m[1], `\"`, `"`)
+			partialAnswer = strings.ReplaceAll(partialAnswer, `\\n`, "\n")
+			if len(partialAnswer) > 20 {
+				log.Printf("parseAnswer: recovered partial answer from truncated JSON (%d chars)", len(partialAnswer))
+				// Also try to extract thinking
+				thinkingRe := regexp.MustCompile(`"thinking"\s*:\s*"((?:[^"\\]|\\.)*)`)
+				var thinking string
+				if tm := thinkingRe.FindStringSubmatch(rawText); len(tm) >= 2 {
+					thinking = strings.ReplaceAll(tm[1], `\"`, `"`)
+					thinking = strings.ReplaceAll(thinking, `\\n`, "\n")
+				}
+				return &Answer{
+					Question:         question,
+					Thinking:         thinking,
+					Answer:           partialAnswer + " [response truncated]",
+					Confidence:       0.5,
+					ConfidenceReason: "Response was truncated — answer may be incomplete",
+				}, nil
+			}
+		}
+
+		// Last resort — return the raw text as the answer
 		return &Answer{
 			Question:   question,
 			Answer:     rawText,

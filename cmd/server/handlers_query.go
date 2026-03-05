@@ -71,13 +71,31 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
 
-	results, err := rw.ret.Search(ctx, req.Question, 20)
+	// Load conversation history for context
+	var history []llm.ChatMessage
+	if req.ConversationID != "" {
+		if msgs, err := s.projects.LoadMessages(req.ProjectID, req.ConversationID); err == nil {
+			for _, m := range msgs {
+				history = append(history, llm.ChatMessage{Role: m.Role, Content: m.Content})
+			}
+		}
+	}
+
+	// Enhance the query using history + document context
+	enhancedQuestion := req.Question
+	if len(history) > 0 {
+		if enhanced, err := llm.EnhanceQuery(ctx, s.getOpenAIKey(), req.Question, history, rw.ret.DocSummaries); err == nil && enhanced != "" {
+			enhancedQuestion = enhanced
+		}
+	}
+
+	results, err := rw.ret.Search(ctx, enhancedQuestion, 20)
 	if err != nil {
 		jsonErr(w, fmt.Sprintf("Retrieval error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	answer, err := llmClient.AnswerQuestion(ctx, req.Question, results, rw.ret.DocSummaries)
+	answer, err := llmClient.AnswerQuestion(ctx, req.Question, results, rw.ret.DocSummaries, history)
 	if err != nil {
 		jsonErr(w, fmt.Sprintf("LLM error: %v", err), http.StatusInternalServerError)
 		return
@@ -114,10 +132,14 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	jsonResp(w, map[string]interface{}{
+	resp := map[string]interface{}{
 		"answer":       answer,
 		"time_seconds": elapsed,
-	})
+	}
+	if enhancedQuestion != req.Question {
+		resp["enhanced_question"] = enhancedQuestion
+	}
+	jsonResp(w, resp)
 }
 
 func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +190,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 				mu.Unlock()
 				return
 			}
-			answer, err := llmClient.AnswerQuestion(ctx, question, results, rw.ret.DocSummaries)
+			answer, err := llmClient.AnswerQuestion(ctx, question, results, rw.ret.DocSummaries, nil)
 			if err != nil {
 				mu.Lock()
 				errors = append(errors, fmt.Sprintf("Q%d LLM: %v", idx, err))

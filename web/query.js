@@ -37,7 +37,7 @@ async function submitQuery() {
 
         const data = await res.json();
         loading.classList.add('hidden');
-        appendAnswer(data);
+        appendAnswer(data, question);
 
         // Auto-name the conversation from the first question
         autoNameConversation(question);
@@ -52,11 +52,17 @@ async function submitQuery() {
     }
 }
 
-function appendAnswer(data) {
+function appendAnswer(data, originalQuestion) {
     const thread = document.getElementById('conversationThread');
     const answer = data.answer;
     const modelLabel = currentModel || 'default';
     const timeSec = data.time_seconds ? data.time_seconds.toFixed(2) + 's' : '';
+
+    // Show enhanced query if the backend rewrote the question
+    let enhancedHtml = '';
+    if (data.enhanced_question && originalQuestion && data.enhanced_question !== originalQuestion) {
+        enhancedHtml = `<div class="msg-enhanced-query" title="Your question was expanded for better search results">🔍 Searched as: <em>${escapeHtml(data.enhanced_question)}</em></div>`;
+    }
 
     // Build the answer text with markdown rendering
     let answerHtml = renderMarkdown(answer.answer || '');
@@ -132,6 +138,7 @@ function appendAnswer(data) {
             <span class="msg-answer-label">Answer</span>
             <span class="msg-answer-time">${timeSec} \u2022 ${currentProvider} / ${modelLabel}</span>
         </div>
+        ${enhancedHtml}
         ${thinkingHtml}
         <div class="msg-answer-text">${answerHtml}</div>
         ${footnotesHtml}

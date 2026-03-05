@@ -49,34 +49,68 @@
 - [x] Created `start.ps1` startup script — checks Go, clears port 8080, builds, runs
 - [x] Fixed `.env.example` (was empty)
 
+### Sprint 5: Hybrid RAG & Chain-of-Thought
+- [x] Reciprocal Rank Fusion (k=60) — BM25 + vector search merged without score calibration
+- [x] Parent-page deduplication — small chunks for retrieval, full pages for LLM context
+- [x] Chain-of-thought reasoning — `thinking` field in LLM responses
+- [x] Collapsible reasoning trace UI — expandable panel showing LLM's step-by-step analysis
+- [x] Confidence scoring (0.0–1.0) with explanation in every answer
+
+### Sprint 6: Frontend Refactor & Document Management
+- [x] Refactored monolithic `app.js` into 9 ES modules (`state.js`, `utils.js`, `ui.js`, `projects.js`, `conversations.js`, `files.js`, `ingest.js`, `query.js`, `app.js`)
+- [x] Individual document removal from indexes — removes chunks from vector + BM25 + re-saves vectors
+- [x] OpenAI restored as dedicated embedding provider (separate from chat)
+- [x] LRU index cache — up to 5 project indexes held in memory for instant switching
+- [x] Binary Gob serialization for vectors (5–10x faster loading)
+- [x] LLM-generated document summaries — structured metadata (title, type, sections, key entities)
+- [x] Concurrent ingestion pipeline — 4 extraction workers, 6 embedding workers, streamed architecture
+
+### Sprint 7: Security & Deployment
+- [x] AES-256-GCM encryption for API keys at rest (machine-derived key)
+- [x] Path traversal protection on all file operations
+- [x] Graceful shutdown with context cancellation propagation
+- [x] `start.ps1` auto-installer — Go, Tesseract, Poppler with multiple fallback strategies
+- [x] Documentation — comprehensive README with architecture diagrams, API reference, screenshots
+- [x] IMPLEMENTATION.md with screenshots placed throughout
+
+### v0.2 Branch: Large Document OCR & API Reliability Fixes
+- [x] Chunked OCR processing — `tesseractOCR()` now processes large PDFs in batches of 50 pages
+- [x] `pdfPageCount()` helper — uses `pdfinfo` or Go PDF library to determine page count
+- [x] `tesseractOCRRange()` — converts page ranges using pdftoppm `-f`/`-l` flags
+- [x] Graceful batch failure — failed batches are skipped, remaining pages still processed
+- [x] API Retry Logic — added exponential backoff (up to 5 attempts) to Anthropic, OpenAI, and HuggingFace providers in `llm.go` to gracefully handle 429 (Rate Limit) and 5xx (Server Overloaded) errors
+
 ---
 
-## Backlog / Future Work
+## v0.2 Roadmap — Open Source Legal AI Solution
 
-### High Priority
+### Phase 1: Core Improvements (Current)
+- [x] Create `v0.2` branch from `main`
+- [x] Fix large document (2000+ pages) processing — chunked OCR
 - [ ] **Streaming responses** — Stream LLM answers token-by-token instead of waiting for full response
 - [ ] **Upload progress** — Show per-file upload progress bar (large PDFs can take time)
 - [ ] **Error recovery on ingestion** — If embedding fails mid-pipeline, allow retry without re-extracting
 - [ ] **API key validation** — Test API keys on save and show immediate pass/fail feedback
-- [ ] **Secure key storage** — Encrypt API keys at rest in `settings.json` instead of plaintext
 
-### Medium Priority
+### Phase 2: User Experience
 - [ ] **Search within documents** — Full-text search across indexed chunks without LLM
 - [ ] **Export conversations** — Download chat history as PDF or Markdown
-- [ ] **Multi-language OCR** — Configurable Tesseract language packs beyond English
-- [ ] **Chunk preview** — Show which chunks were retrieved for an answer (debug view)
 - [ ] **Document viewer** — Inline PDF viewer with highlighted citations
-- [ ] **Custom embedding models** — Allow configuring specific model names for embeddings
-- [ ] **Re-index on settings change** — Prompt user to re-process if embedding provider changes
-
-### Low Priority / Nice to Haves
-- [ ] **Dark/light theme toggle** — Currently dark-only
-- [ ] **Mobile responsive** — Sidebar collapses on small screens (partially done)
-- [ ] **Keyboard shortcuts** — Ctrl+Enter to send, Ctrl+N for new conversation
-- [ ] **Drag-and-drop reorder** — Reorder projects in sidebar
-- [ ] **Auto-save drafts** — Save in-progress question input
 - [ ] **Markdown rendering** — Render LLM answers with full Markdown (tables, code blocks)
-- [ ] **WebSocket for ingestion** — Replace polling with WebSocket push for real-time progress
-- [ ] **Multi-user support** — Auth, separate data directories per user
+- [ ] **Dark/light theme toggle** — Currently dark-only
+- [ ] **Mobile responsive** — Sidebar collapses on small screens
+- [ ] **Keyboard shortcuts** — Ctrl+Enter to send, Ctrl+N for new conversation
+
+### Phase 3: Scalability & Deployment
 - [ ] **Docker deployment** — Dockerfile with Tesseract pre-installed
+- [ ] **Multi-language OCR** — Configurable Tesseract language packs beyond English
+- [ ] **Custom embedding models** — Allow configuring specific model names
+- [ ] **Re-index on settings change** — Prompt user to re-process if embedding provider changes
+- [ ] **WebSocket for ingestion** — Replace polling with WebSocket push for real-time progress
 - [ ] **Test suite** — Unit tests for indexer, retriever, and LLM response parser
+
+### Phase 4: Open Source Release
+- [ ] **License change** — Select appropriate open-source license
+- [ ] **Documentation overhaul** — Contributing guide, setup for different OSes
+- [ ] **Multi-user support** — Auth, separate data directories per user
+- [ ] **Production hosting** — Cloud deployment with managed infrastructure

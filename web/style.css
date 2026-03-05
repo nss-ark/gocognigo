@@ -1452,6 +1452,24 @@ body {
 }
 
 /* Thinking toggle (collapsed by default) */
+
+/* Enhanced query banner — shown when the backend rewrites a vague question */
+.msg-enhanced-query {
+    margin-bottom: 0.6rem;
+    padding: 0.4rem 0.7rem;
+    background: rgba(56, 189, 248, 0.06);
+    border: 1px solid rgba(56, 189, 248, 0.15);
+    border-radius: var(--radius-sm);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.msg-enhanced-query em {
+    color: var(--accent-cyan);
+    font-style: italic;
+}
+
 .msg-thinking {
     margin-bottom: 0.75rem;
 }

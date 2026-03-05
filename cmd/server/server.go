@@ -320,6 +320,11 @@ func (s *Server) getProvider(requestedProvider, requestedModel string) (llm.Prov
 	return llm.NewProvider(provider, apiKey, requestedModel)
 }
 
+// getOpenAIKey returns the configured OpenAI API key (used for query enhancement).
+func (s *Server) getOpenAIKey() string {
+	return s.providerKeys["openai"]
+}
+
 func jsonResp(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
