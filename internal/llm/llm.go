@@ -171,6 +171,24 @@ func isReasoningModel(model string) bool {
 		strings.HasPrefix(model, "o4")
 }
 
+// isAdaptiveThinkingModel returns true for Claude models that use adaptive
+// thinking (type: "adaptive"). These models reject the temperature parameter
+// and require a thinking block in the API request.
+func isAdaptiveThinkingModel(model string) bool {
+	return strings.HasPrefix(model, "claude-opus-4-6") ||
+		strings.HasPrefix(model, "claude-sonnet-4-6")
+}
+
+// isExtendedThinkingModel returns true for older Claude models that support
+// extended thinking with type: "enabled" and budget_tokens.
+func isExtendedThinkingModel(model string) bool {
+	return strings.HasPrefix(model, "claude-opus-4-5") ||
+		strings.HasPrefix(model, "claude-opus-4-1") ||
+		strings.HasPrefix(model, "claude-sonnet-4-5") ||
+		strings.HasPrefix(model, "claude-sonnet-4-2") ||
+		strings.HasPrefix(model, "claude-haiku-4-5")
+}
+
 // ==========================================
 // OpenAI Provider
 // ==========================================
@@ -383,13 +401,30 @@ func (p *AnthropicProvider) AnswerQuestion(ctx context.Context, question string,
 	}
 	anthMessages = append(anthMessages, map[string]string{"role": "user", "content": userPrompt})
 
-	reqBody, _ := json.Marshal(map[string]interface{}{
-		"model":       p.model,
-		"max_tokens":  4096,
-		"temperature": 0.1,
-		"system":      baseSystemPrompt,
-		"messages":    anthMessages,
-	})
+	// Build request body conditionally based on model capabilities
+	reqMap := map[string]interface{}{
+		"model":      p.model,
+		"max_tokens": 4096,
+		"system":     baseSystemPrompt,
+		"messages":   anthMessages,
+	}
+
+	if isAdaptiveThinkingModel(p.model) {
+		// Opus 4.6 / Sonnet 4.6: use adaptive thinking, no temperature allowed
+		reqMap["thinking"] = map[string]interface{}{"type": "adaptive"}
+		reqMap["max_tokens"] = 16000 // thinking budget comes from max_tokens
+		log.Printf("Anthropic: using adaptive thinking for model %s", p.model)
+	} else if isExtendedThinkingModel(p.model) {
+		// Older thinking models: use enabled + budget_tokens, no temperature
+		reqMap["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": 10000}
+		reqMap["max_tokens"] = 16000
+		log.Printf("Anthropic: using extended thinking for model %s", p.model)
+	} else {
+		// Non-thinking models (e.g. Claude 3 Opus, Claude 3.5 Sonnet)
+		reqMap["temperature"] = 0.1
+	}
+
+	reqBody, _ := json.Marshal(reqMap)
 
 	var resp *http.Response
 	var err error

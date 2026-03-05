@@ -80,6 +80,13 @@
 - [x] Graceful batch failure — failed batches are skipped, remaining pages still processed
 - [x] API Retry Logic — added exponential backoff (up to 5 attempts) to Anthropic, OpenAI, and HuggingFace providers in `llm.go` to gracefully handle 429 (Rate Limit) and 5xx (Server Overloaded) errors
 
+### v0.2 Sprint 2: Conversational AI, Streaming & Model Fixes
+- [x] Conversation memory — LLM receives last 5 exchanges as context for follow-up questions
+- [x] Query enhancement — `EnhanceQuery()` in `enhance.go` uses GPT-4o-mini to rewrite vague/context-dependent questions into self-contained search queries
+- [x] Legal citation prompting — system prompt requires inline legal provision citations (Section, Regulation, Rule)
+- [x] Claude Opus 4.6 fix — adaptive thinking support (`thinking.type: "adaptive"`), removed incompatible `temperature` parameter, extended thinking for older models
+- [x] Streaming responses — SSE-based token-by-token streaming via `/api/query/stream` for all 3 providers (Anthropic, OpenAI, HuggingFace) with real-time UI rendering in `query.js`
+
 ---
 
 ## v0.2 Roadmap — Open Source Legal AI Solution
@@ -87,7 +94,7 @@
 ### Phase 1: Core Improvements (Current)
 - [x] Create `v0.2` branch from `main`
 - [x] Fix large document (2000+ pages) processing — chunked OCR
-- [ ] **Streaming responses** — Stream LLM answers token-by-token instead of waiting for full response
+- [x] **Streaming responses** — Stream LLM answers token-by-token instead of waiting for full response
 - [ ] **Upload progress** — Show per-file upload progress bar (large PDFs can take time)
 - [ ] **Error recovery on ingestion** — If embedding fails mid-pipeline, allow retry without re-extracting
 - [ ] **API key validation** — Test API keys on save and show immediate pass/fail feedback

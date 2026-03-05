@@ -142,6 +142,147 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, resp)
 }
 
+func (s *Server) handleStreamQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req QueryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonErr(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ProjectID == "" {
+		jsonErr(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
+
+	rw, err := s.getRetrieverForProject(req.ProjectID)
+	if err != nil {
+		jsonErr(w, "No documents indexed. Upload and process documents first.", http.StatusBadRequest)
+		return
+	}
+
+	llmClient, err := s.getProvider(req.Provider, req.Model)
+	if err != nil {
+		jsonErr(w, fmt.Sprintf("Provider error: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Check that the provider supports streaming
+	streamClient, ok := llmClient.(llm.StreamProvider)
+	if !ok {
+		jsonErr(w, "Provider does not support streaming", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	start := time.Now()
+
+	// Load conversation history for context
+	var history []llm.ChatMessage
+	if req.ConversationID != "" {
+		if msgs, err := s.projects.LoadMessages(req.ProjectID, req.ConversationID); err == nil {
+			for _, m := range msgs {
+				history = append(history, llm.ChatMessage{Role: m.Role, Content: m.Content})
+			}
+		}
+	}
+
+	// Enhance the query using history + document context
+	enhancedQuestion := req.Question
+	if len(history) > 0 {
+		if enhanced, err := llm.EnhanceQuery(ctx, s.getOpenAIKey(), req.Question, history, rw.ret.DocSummaries); err == nil && enhanced != "" {
+			enhancedQuestion = enhanced
+		}
+	}
+
+	results, err := rw.ret.Search(ctx, enhancedQuestion, 20)
+	if err != nil {
+		jsonErr(w, fmt.Sprintf("Retrieval error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Send enhanced question as first event if it was rewritten
+	if enhancedQuestion != req.Question {
+		eqData, _ := json.Marshal(map[string]string{
+			"type":              "enhanced_question",
+			"enhanced_question": enhancedQuestion,
+		})
+		fmt.Fprintf(w, "data: %s\n\n", eqData)
+		flusher.Flush()
+	}
+
+	// Start streaming
+	tokenCh := make(chan llm.StreamToken, 100)
+	go streamClient.StreamAnswer(ctx, req.Question, results, rw.ret.DocSummaries, history, tokenCh)
+
+	var finalAnswer *llm.Answer
+
+	for tok := range tokenCh {
+		data, _ := json.Marshal(tok)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+
+		if tok.Type == "done" && tok.Final != nil {
+			finalAnswer = tok.Final
+		}
+	}
+
+	elapsed := time.Since(start).Seconds()
+
+	// Send timing info as final event
+	doneData, _ := json.Marshal(map[string]interface{}{
+		"type":         "complete",
+		"time_seconds": elapsed,
+	})
+	fmt.Fprintf(w, "data: %s\n\n", doneData)
+	flusher.Flush()
+
+	// Persist messages to conversation
+	if req.ConversationID != "" && finalAnswer != nil {
+		userMsg := chat.Message{
+			Role:      "user",
+			Content:   req.Question,
+			Timestamp: start,
+		}
+		assistantMsg := chat.Message{
+			Role:    "assistant",
+			Content: finalAnswer.Answer,
+			Metadata: map[string]interface{}{
+				"thinking":          finalAnswer.Thinking,
+				"documents":         finalAnswer.Documents,
+				"pages":             finalAnswer.Pages,
+				"footnotes":         finalAnswer.Footnotes,
+				"confidence":        finalAnswer.Confidence,
+				"confidence_reason": finalAnswer.ConfidenceReason,
+				"time_seconds":      elapsed,
+				"provider":          req.Provider,
+				"model":             req.Model,
+			},
+			Timestamp: time.Now(),
+		}
+		go func() {
+			_ = s.projects.SaveMessage(req.ProjectID, req.ConversationID, userMsg)
+			_ = s.projects.SaveMessage(req.ProjectID, req.ConversationID, assistantMsg)
+		}()
+	}
+}
+
 func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

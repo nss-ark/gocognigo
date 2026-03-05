@@ -24,7 +24,8 @@ async function submitQuery() {
     scrollThread();
 
     try {
-        const res = await fetch(`${API_BASE}/api/query`, {
+        // Use streaming endpoint
+        const res = await fetch(`${API_BASE}/api/query/stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ question, provider: currentProvider, model: currentModel, project_id: activeProjectId, conversation_id: activeConversationId })
@@ -35,21 +36,209 @@ async function submitQuery() {
             throw new Error(errData.error || 'Request failed');
         }
 
-        const data = await res.json();
         loading.classList.add('hidden');
-        appendAnswer(data, question);
+
+        // Create the answer bubble shell for streaming
+        const { answerDiv, textEl, streamState } = createStreamBubble();
+        thread.appendChild(answerDiv);
+        scrollThread();
+
+        // Read SSE stream
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const jsonStr = line.slice(6);
+
+                try {
+                    const event = JSON.parse(jsonStr);
+
+                    switch (event.type) {
+                        case 'text':
+                            streamState.rawText += event.token;
+                            textEl.textContent += event.token;
+                            scrollThread();
+                            break;
+
+                        case 'thinking':
+                            streamState.thinkingText += event.token;
+                            break;
+
+                        case 'enhanced_question':
+                            streamState.enhancedQuestion = event.enhanced_question;
+                            break;
+
+                        case 'done':
+                            if (event.final) {
+                                streamState.finalAnswer = event.final;
+                            }
+                            break;
+
+                        case 'complete':
+                            streamState.timeSeconds = event.time_seconds;
+                            break;
+
+                        case 'error':
+                            textEl.textContent = 'Error: ' + (event.error || 'Unknown streaming error');
+                            textEl.style.color = 'var(--danger)';
+                            break;
+                    }
+                } catch (e) {
+                    // Skip malformed events
+                }
+            }
+        }
+
+        // Finalize the answer bubble with full formatting
+        finalizeStreamAnswer(answerDiv, streamState, question);
 
         // Auto-name the conversation from the first question
         autoNameConversation(question);
     } catch (e) {
         loading.classList.add('hidden');
-        // Show error in thread as a message
         const errDiv = document.createElement('div');
         errDiv.className = 'msg-answer';
         errDiv.innerHTML = `<div class="msg-answer-header"><span class="msg-answer-label" style="color:var(--danger)">Error</span></div><div class="msg-answer-text" style="color:var(--danger)">${escapeHtml(e.message)}</div>`;
         thread.appendChild(errDiv);
         scrollThread();
     }
+}
+
+function createStreamBubble() {
+    const answerDiv = document.createElement('div');
+    answerDiv.className = 'msg-answer';
+    const modelLabel = currentModel || 'default';
+
+    answerDiv.innerHTML = `
+        <div class="msg-answer-header">
+            <span class="msg-answer-label">Answer</span>
+            <span class="msg-answer-time" data-stream-time>streaming\u2026 \u2022 ${currentProvider} / ${modelLabel}</span>
+        </div>
+        <div data-stream-enhanced style="display:none"></div>
+        <div data-stream-thinking style="display:none"></div>
+        <div class="msg-answer-text" data-stream-text style="white-space:pre-wrap"></div>
+        <div data-stream-footnotes style="display:none"></div>
+        <div class="msg-confidence" data-stream-confidence style="display:none"></div>
+    `;
+
+    const textEl = answerDiv.querySelector('[data-stream-text]');
+    const streamState = {
+        rawText: '',
+        thinkingText: '',
+        enhancedQuestion: null,
+        finalAnswer: null,
+        timeSeconds: 0,
+    };
+
+    return { answerDiv, textEl, streamState };
+}
+
+function finalizeStreamAnswer(answerDiv, streamState, originalQuestion) {
+    const answer = streamState.finalAnswer;
+    const textEl = answerDiv.querySelector('[data-stream-text]');
+    const timeEl = answerDiv.querySelector('[data-stream-time]');
+    const enhancedEl = answerDiv.querySelector('[data-stream-enhanced]');
+    const thinkingEl = answerDiv.querySelector('[data-stream-thinking]');
+    const footnotesEl = answerDiv.querySelector('[data-stream-footnotes]');
+    const confidenceEl = answerDiv.querySelector('[data-stream-confidence]');
+
+    // Update time display
+    const timeSec = streamState.timeSeconds ? streamState.timeSeconds.toFixed(2) + 's' : '';
+    const modelLabel = currentModel || 'default';
+    timeEl.textContent = `${timeSec} \u2022 ${currentProvider} / ${modelLabel}`;
+
+    // Show enhanced question if rewritten
+    if (streamState.enhancedQuestion && originalQuestion && streamState.enhancedQuestion !== originalQuestion) {
+        enhancedEl.innerHTML = `<div class="msg-enhanced-query" title="Your question was expanded for better search results">\uD83D\uDD0D Searched as: <em>${escapeHtml(streamState.enhancedQuestion)}</em></div>`;
+        enhancedEl.style.display = '';
+    }
+
+    // Remove inline white-space style now that we're rendering HTML
+    textEl.style.whiteSpace = '';
+
+    // Re-render with markdown
+    if (answer) {
+        let answerHtml = renderMarkdown(answer.answer || streamState.rawText || '');
+        answerHtml = answerHtml.replace(/\[(\d+)\]/g, (match, num) => `<span class="footnote-ref">${num}</span>`);
+        textEl.innerHTML = answerHtml;
+
+        // Footnotes
+        let footnotes = answer.footnotes || [];
+        if (footnotes.length === 0 && answer.documents && answer.documents.length > 0) {
+            footnotes = answer.documents.map((doc, i) => ({
+                id: i + 1,
+                document: doc,
+                page: answer.pages && answer.pages[i] ? answer.pages[i] : 0
+            }));
+        }
+        if (footnotes.length > 0) {
+            const seen = new Set();
+            footnotes = footnotes.filter(fn => {
+                const key = `${fn.document}:${fn.page}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+            footnotesEl.innerHTML = `
+                <div class="msg-footnotes">
+                    <div class="msg-footnotes-title">Sources</div>
+                    ${footnotes.map(fn =>
+                `<div class="footnote-item">
+                            <span class="footnote-num">${fn.id}</span>
+                            <span class="footnote-doc">${escapeHtml(fn.document)}</span>
+                            ${fn.page ? `<span class="footnote-page">p.${fn.page}</span>` : ''}
+                        </div>`).join('')}
+                </div>`;
+            footnotesEl.style.display = '';
+        }
+
+        // Confidence
+        const conf = answer.confidence || 0;
+        const confColor = conf > 0.8 ? 'var(--success)' : conf > 0.5 ? 'var(--warning)' : 'var(--danger)';
+        const confReason = answer.confidence_reason || getDefaultConfidenceReason(conf);
+        confidenceEl.innerHTML = `
+            <div class="confidence-bar">
+                <div class="confidence-fill" style="width:${conf * 100}%; background:${confColor}"></div>
+            </div>
+            <span class="confidence-text">${(conf * 100).toFixed(0)}%</span>
+            <span class="confidence-info">?
+                <span class="confidence-tooltip">${escapeHtml(confReason)}</span>
+            </span>`;
+        confidenceEl.style.display = '';
+
+        // Thinking
+        const thinkingContent = answer.thinking || streamState.thinkingText;
+        if (thinkingContent) {
+            const thinkingTextHtml = escapeHtml(thinkingContent).replace(/\n/g, '<br>');
+            thinkingEl.innerHTML = `
+                <div class="msg-thinking">
+                    <button class="msg-thinking-toggle" onclick="this.parentElement.classList.toggle('open')">
+                        <span class="thinking-icon">\uD83E\uDDE0</span>
+                        <span class="thinking-label">Show reasoning</span>
+                        <span class="thinking-chevron">\u25B6</span>
+                    </button>
+                    <div class="msg-thinking-content">${thinkingTextHtml}</div>
+                </div>`;
+            thinkingEl.style.display = '';
+        }
+    } else {
+        // No final answer — render raw text with markdown
+        let answerHtml = renderMarkdown(streamState.rawText || '');
+        answerHtml = answerHtml.replace(/\[(\d+)\]/g, (match, num) => `<span class="footnote-ref">${num}</span>`);
+        textEl.innerHTML = answerHtml;
+    }
+
+    scrollThread();
 }
 
 function appendAnswer(data, originalQuestion) {

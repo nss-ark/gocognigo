@@ -251,3 +251,47 @@ func TestNewProvider_ValidAnthropic(t *testing.T) {
 		t.Error("expected non-nil provider")
 	}
 }
+
+// ========== Thinking Model Detection ==========
+
+func TestIsAdaptiveThinkingModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{"claude-opus-4-6", true},
+		{"claude-opus-4-6-20260205", true},
+		{"claude-sonnet-4-6", true},
+		{"claude-sonnet-4-6-20260205", true},
+		{"claude-opus-4-5-20251101", false},
+		{"claude-3-opus-20240229", false},
+		{"claude-3-5-sonnet-20241022", false},
+		{"gpt-4o", false},
+	}
+	for _, tt := range tests {
+		if got := isAdaptiveThinkingModel(tt.model); got != tt.want {
+			t.Errorf("isAdaptiveThinkingModel(%q) = %v, want %v", tt.model, got, tt.want)
+		}
+	}
+}
+
+func TestIsExtendedThinkingModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{"claude-opus-4-5-20251101", true},
+		{"claude-opus-4-1-20250805", true},
+		{"claude-sonnet-4-5-20250929", true},
+		{"claude-haiku-4-5-20251001", true},
+		{"claude-opus-4-6", false},        // adaptive, not extended
+		{"claude-sonnet-4-6", false},      // adaptive, not extended
+		{"claude-3-opus-20240229", false}, // too old
+		{"claude-3-5-sonnet-20241022", false},
+	}
+	for _, tt := range tests {
+		if got := isExtendedThinkingModel(tt.model); got != tt.want {
+			t.Errorf("isExtendedThinkingModel(%q) = %v, want %v", tt.model, got, tt.want)
+		}
+	}
+}

@@ -138,6 +138,7 @@ func main() {
 
 	// Existing API endpoints
 	mux.HandleFunc("/api/query", srv.handleQuery)
+	mux.HandleFunc("/api/query/stream", srv.handleStreamQuery)
 	mux.HandleFunc("/api/batch", srv.handleBatch)
 	mux.HandleFunc("/api/stats", srv.handleStats)
 	mux.HandleFunc("/api/providers", srv.handleProviders)
