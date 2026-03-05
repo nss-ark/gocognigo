@@ -52,6 +52,8 @@ type Chunk struct {
 // EmbeddingProvider defines the interface for embeddings
 type EmbeddingProvider interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
+	BatchSize() int      // optimal number of texts per API call
+	MaxConcurrency() int // max parallel API calls
 }
 
 // ProgressFunc is called during ingestion with (totalChunks, chunksDone).
@@ -89,7 +91,7 @@ func NewIndex(providerName, apiKey, modelName, bm25Path string) (*Index, error) 
 		if modelName == "" {
 			modelName = "BAAI/bge-small-en-v1.5"
 		}
-		embedder = &HuggingFaceEmbedder{apiKey: apiKey, model: modelName}
+		embedder = newHuggingFaceEmbedder(apiKey, modelName)
 	case "openai", "":
 		if modelName == "" {
 			modelName = "text-embedding-3-small"
@@ -164,8 +166,8 @@ func (idx *Index) EmbedAndIndex(ctx context.Context, chunks []Chunk, progress Pr
 
 	totalChunks := len(chunks)
 
-	// Build batch jobs — 200 per batch for good throughput
-	batchSize := 200
+	// Use provider-specific batch size and concurrency
+	batchSize := idx.Embedder.BatchSize()
 	type batchJob struct {
 		start int
 		end   int
@@ -179,8 +181,8 @@ func (idx *Index) EmbedAndIndex(ctx context.Context, chunks []Chunk, progress Pr
 		jobs = append(jobs, batchJob{start: i, end: end})
 	}
 
-	// Run embedding batches with concurrency limit
-	concurrency := 6
+	// Run embedding batches with provider-specific concurrency
+	concurrency := idx.Embedder.MaxConcurrency()
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	var firstErr error
@@ -491,12 +493,31 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 	return results, nil
 }
 
+func (e *OpenAIEmbedder) BatchSize() int      { return 200 }
+func (e *OpenAIEmbedder) MaxConcurrency() int { return 8 }
+
 // ==========================================
-// HuggingFace Embedder
+// HuggingFace Embedder — connection-pooled, timeout-protected
 // ==========================================
 type HuggingFaceEmbedder struct {
 	apiKey string
 	model  string
+	client *http.Client
+}
+
+func newHuggingFaceEmbedder(apiKey, model string) *HuggingFaceEmbedder {
+	return &HuggingFaceEmbedder{
+		apiKey: apiKey,
+		model:  model,
+		client: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        20,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+	}
 }
 
 func (e *HuggingFaceEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
@@ -509,8 +530,7 @@ func (e *HuggingFaceEmbedder) Embed(ctx context.Context, texts []string) ([][]fl
 	req.Header.Set("Authorization", "Bearer "+e.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := e.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -537,3 +557,6 @@ func (e *HuggingFaceEmbedder) Embed(ctx context.Context, texts []string) ([][]fl
 
 	return results, nil
 }
+
+func (e *HuggingFaceEmbedder) BatchSize() int      { return 50 }
+func (e *HuggingFaceEmbedder) MaxConcurrency() int { return 6 }
