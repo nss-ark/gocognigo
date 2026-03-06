@@ -104,7 +104,7 @@
 - [x] **Search within documents** — Full-text search across indexed chunks without LLM
 - [x] **Export conversations** — Download chat history as PDF or Markdown
 - [ ] **Document viewer** — Inline PDF viewer with highlighted citations
-- [ ] **Markdown rendering** — Render LLM answers with full Markdown (tables, code blocks)
+- [x] **Markdown rendering** — Render LLM answers with full Markdown (tables, code blocks)
 - [ ] **Dark/light theme toggle** — Currently dark-only
 - [ ] **Mobile responsive** — Sidebar collapses on small screens
 - [ ] **Keyboard shortcuts** — Ctrl+Enter to send, Ctrl+N for new conversation

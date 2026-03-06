@@ -37,6 +37,77 @@ function renderMarkdown(text) {
     html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
     html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
 
+    // Horizontal rules: --- or *** or ___ on a line by itself
+    html = html.replace(/^(?:[-*_]){3,}\s*$/gm, '<hr>');
+
+    // Tables: detect consecutive lines with pipe separators (line-by-line approach)
+    html = (function parseTablesInText(text) {
+        const lines = text.split('\n');
+        const result = [];
+        let tableLines = [];
+
+        function isTableRow(line) {
+            const trimmed = line.trim();
+            // A table row has at least 2 pipe characters and contains text between them
+            const pipeCount = (trimmed.match(/\|/g) || []).length;
+            return pipeCount >= 2;
+        }
+
+        function isSeparatorRow(line) {
+            // Separator: |---|---| or |:---:|---:| etc.
+            return /^\s*\|[\s:]*[-]{2,}[\s:]*\|/.test(line) || /^\s*[-|:\s]+$/.test(line) && (line.match(/\|/g) || []).length >= 2 && (line.match(/-{2,}/g) || []).length >= 1;
+        }
+
+        function flushTable() {
+            if (tableLines.length < 2) {
+                result.push(...tableLines);
+                tableLines = [];
+                return;
+            }
+
+            // Check if second line is a separator
+            const hasSeparator = isSeparatorRow(tableLines[1]);
+            let headerRow = null;
+            let dataRows = tableLines;
+
+            if (hasSeparator) {
+                headerRow = tableLines[0];
+                dataRows = tableLines.slice(2);
+            }
+
+            let tableHtml = '<table>';
+            if (headerRow) {
+                const cells = headerRow.split('|').map(c => c.trim()).filter(c => c !== '');
+                tableHtml += '<thead><tr>' + cells.map(c => `<th>${c}</th>`).join('') + '</tr></thead>';
+            }
+            if (dataRows.length > 0) {
+                tableHtml += '<tbody>';
+                for (const row of dataRows) {
+                    const cells = row.split('|').map(c => c.trim()).filter(c => c !== '');
+                    if (cells.length > 0) {
+                        tableHtml += '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+                    }
+                }
+                tableHtml += '</tbody>';
+            }
+            tableHtml += '</table>';
+            result.push(tableHtml);
+            tableLines = [];
+        }
+
+        for (const line of lines) {
+            if (isTableRow(line)) {
+                tableLines.push(line);
+            } else {
+                if (tableLines.length > 0) flushTable();
+                result.push(line);
+            }
+        }
+        if (tableLines.length > 0) flushTable();
+
+        return result.join('\n');
+    })(html);
+
     // Numbered lists: handle items separated by blank lines (LLM style)
     html = html.replace(/^(\d+)\.\s(.+)$/gm, (match, num, text) => {
         return `<ol start="${num}"><li>${text}</li></ol>`;
@@ -61,8 +132,9 @@ function renderMarkdown(text) {
     // Clean up empty paragraphs
     html = html.replace(/<p>\s*<\/p>/g, '');
     // Don't wrap block elements in <p>
-    html = html.replace(/<p>(<(?:ol|ul|h[2-4]|pre))/g, '$1');
-    html = html.replace(/(<\/(?:ol|ul|h[2-4]|pre)>)<\/p>/g, '$1');
+    html = html.replace(/<p>(<(?:ol|ul|h[2-4]|pre|table|hr))/g, '$1');
+    html = html.replace(/(<\/(?:ol|ul|h[2-4]|pre|table)>)<\/p>/g, '$1');
+    html = html.replace(/<hr><\/p>/g, '<hr>');
 
     return html;
 }

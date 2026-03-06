@@ -2954,3 +2954,134 @@ body {
     color: var(--accent-primary);
     background: rgba(139, 92, 246, 0.12);
 }
+
+/* ========== Rendered Markdown in Answers ========== */
+
+.msg-answer-text h2,
+.msg-answer-text h3,
+.msg-answer-text h4,
+.batch-answer h2,
+.batch-answer h3,
+.batch-answer h4 {
+    margin: 0.8em 0 0.4em;
+    color: var(--text-primary);
+    line-height: 1.3;
+}
+
+.msg-answer-text h2,
+.batch-answer h2 {
+    font-size: 1.1rem;
+}
+
+.msg-answer-text h3,
+.batch-answer h3 {
+    font-size: 0.95rem;
+}
+
+.msg-answer-text h4,
+.batch-answer h4 {
+    font-size: 0.85rem;
+}
+
+.msg-answer-text p,
+.batch-answer p {
+    margin: 0 0 0.5em;
+}
+
+.msg-answer-text strong,
+.batch-answer strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* Inline code */
+.msg-answer-text code,
+.batch-answer code {
+    font-family: var(--font-mono);
+    font-size: 0.82em;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 0.15em 0.35em;
+    border-radius: 4px;
+    color: #e2b3ff;
+}
+
+/* Code blocks */
+.msg-answer-text pre,
+.batch-answer pre {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    margin: 0.6em 0;
+    overflow-x: auto;
+    line-height: 1.5;
+}
+
+.msg-answer-text pre code,
+.batch-answer pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+/* Tables */
+.msg-answer-text table,
+.batch-answer table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.6em 0;
+    font-size: 0.8rem;
+}
+
+.msg-answer-text th,
+.batch-answer th {
+    text-align: left;
+    padding: 0.45rem 0.65rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 2px solid var(--border);
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.msg-answer-text td,
+.batch-answer td {
+    padding: 0.4rem 0.65rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    color: var(--text-secondary);
+}
+
+.msg-answer-text tbody tr:hover,
+.batch-answer tbody tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+/* Lists */
+.msg-answer-text ul,
+.msg-answer-text ol,
+.batch-answer ul,
+.batch-answer ol {
+    margin: 0.4em 0;
+    padding-left: 1.5em;
+}
+
+.msg-answer-text li,
+.batch-answer li {
+    margin: 0.15em 0;
+    line-height: 1.5;
+}
+
+.msg-answer-text ul li::marker {
+    color: var(--accent-primary);
+}
+
+/* Horizontal rules */
+.msg-answer-text hr,
+.batch-answer hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0.8em 0;
+}
