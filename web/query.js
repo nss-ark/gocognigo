@@ -826,9 +826,14 @@ function switchMode(mode) {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
     document.getElementById('singlePanel').classList.toggle('hidden', mode !== 'single');
+    document.getElementById('searchPanel').classList.toggle('hidden', mode !== 'search');
     document.getElementById('batchPanel').classList.toggle('hidden', mode !== 'batch');
     document.getElementById('singleResult').classList.add('hidden');
     document.getElementById('batchResults').classList.add('hidden');
+    // Focus search input when entering search mode
+    if (mode === 'search') {
+        setTimeout(() => document.getElementById('searchInput').focus(), 100);
+    }
 }
 
 // ===== Stats =====

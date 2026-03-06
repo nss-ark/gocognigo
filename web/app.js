@@ -81,6 +81,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Mode switching
     document.getElementById('singleModeBtn').addEventListener('click', () => switchMode('single'));
+    document.getElementById('searchModeBtn').addEventListener('click', () => switchMode('search'));
     document.getElementById('batchModeBtn').addEventListener('click', () => switchMode('batch'));
 
     // Settings panel

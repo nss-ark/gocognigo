@@ -96,12 +96,12 @@
 - [x] Fix large document (2000+ pages) processing — chunked OCR
 - [x] **Streaming responses** — Stream LLM answers token-by-token instead of waiting for full response
 - [x] **Upload progress** — Show per-file upload progress bar (large PDFs can take time)
-- [ ] **Error recovery on ingestion** — If embedding fails mid-pipeline, allow retry without re-extracting
-- [ ] **API key validation** — Test API keys on save and show immediate pass/fail feedback
+- [x] **Error recovery on ingestion** — If embedding fails mid-pipeline, allow retry without re-extracting
+- [x] **API key validation** — Test API keys on save and show immediate pass/fail feedback
 - [x] **Embedding speed optimization** — Connection pooling for HuggingFace, adaptive batch sizing (50 HF / 200 OpenAI), 60s HTTP timeout, provider-specific concurrency (6 HF / 8 OpenAI)
 
 ### Phase 2: User Experience
-- [ ] **Search within documents** — Full-text search across indexed chunks without LLM
+- [x] **Search within documents** — Full-text search across indexed chunks without LLM
 - [ ] **Export conversations** — Download chat history as PDF or Markdown
 - [ ] **Document viewer** — Inline PDF viewer with highlighted citations
 - [ ] **Markdown rendering** — Render LLM answers with full Markdown (tables, code blocks)
