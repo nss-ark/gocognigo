@@ -347,27 +347,91 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		s.mu.Unlock()
 	}()
 
-	// Close old index if loaded for this project
+	// Try to reuse existing index for incremental ingestion
+	var idx *indexer.Index
+	var existingDocs map[string]bool
+
 	s.mu.Lock()
 	if s.activeProjectID == ProjectID && s.activeIndex != nil {
-		_ = s.activeIndex.Close()
-		s.activeIndex = nil
-		s.activeRetriever = nil
+		idx = s.activeIndex
+		// Build set of already-indexed document names
+		existingDocs = make(map[string]bool)
+		for _, c := range idx.Chunks {
+			existingDocs[c.Document] = true
+		}
+	}
+	// Also check cache
+	if idx == nil {
+		if cached, ok := s.indexCache.get(ProjectID); ok {
+			idx = cached.idx
+			existingDocs = make(map[string]bool)
+			for _, c := range idx.Chunks {
+				existingDocs[c.Document] = true
+			}
+		}
 	}
 	s.mu.Unlock()
 
-	// Remove old BM25 index directory so bleve can create a fresh one
-	_ = os.RemoveAll(bm25Dir)
+	// Filter to only new (unindexed) files
+	var newFiles []string
+	if existingDocs != nil {
+		for _, f := range files {
+			if !existingDocs[f] {
+				newFiles = append(newFiles, f)
+			}
+		}
+	} else {
+		newFiles = files
+	}
 
-	// Create fresh index
-	idx, err := indexer.NewIndex(s.embedProvider, s.embedAPIKey, "", bm25Dir)
-	if err != nil {
+	if len(newFiles) == 0 {
+		// All files are already indexed — just mark done
+		log.Printf("All %d files already indexed, nothing to do", len(files))
 		s.ingestStatus.mu.Lock()
-		s.ingestStatus.Phase = "error"
-		s.ingestStatus.Error = fmt.Sprintf("Failed to create index: %v", err)
+		s.ingestStatus.Phase = "done"
+		s.ingestStatus.Error = ""
 		s.ingestStatus.mu.Unlock()
+
+		sess, _ := s.projects.Get(ProjectID)
+		if sess != nil {
+			sess.Status = "ready"
+			_ = s.projects.Update(*sess)
+		}
 		return
 	}
+
+	log.Printf("Incremental ingestion: %d new files, %d already indexed", len(newFiles), len(files)-len(newFiles))
+
+	// Create fresh index only if we don't have one
+	if idx == nil {
+		// Close old index if it belongs to this project
+		s.mu.Lock()
+		if s.activeProjectID == ProjectID && s.activeIndex != nil {
+			_ = s.activeIndex.Close()
+			s.activeIndex = nil
+			s.activeRetriever = nil
+		}
+		s.mu.Unlock()
+
+		// Remove old BM25 index directory so bleve can create a fresh one
+		_ = os.RemoveAll(bm25Dir)
+
+		var err error
+		idx, err = indexer.NewIndex(s.embedProvider, s.embedAPIKey, "", bm25Dir)
+		if err != nil {
+			s.ingestStatus.mu.Lock()
+			s.ingestStatus.Phase = "error"
+			s.ingestStatus.Error = fmt.Sprintf("Failed to create index: %v", err)
+			s.ingestStatus.mu.Unlock()
+			return
+		}
+	}
+
+	// Update ingest status for new files only
+	s.ingestStatus.mu.Lock()
+	s.ingestStatus.FilesTotal = len(newFiles)
+	s.ingestStatus.FilesDone = 0
+	s.ingestStatus.mu.Unlock()
 
 	// ===== STREAMED PIPELINE =====
 	type extractResult struct {
@@ -381,11 +445,11 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		chunksTotal int64
 	)
 
-	resultsCh := make(chan extractResult, len(files))
+	resultsCh := make(chan extractResult, len(newFiles))
 	extractSem := make(chan struct{}, 4)
 	var extractWg sync.WaitGroup
 
-	for _, filename := range files {
+	for _, filename := range newFiles {
 		extractWg.Add(1)
 		go func(fname string) {
 			defer extractWg.Done()

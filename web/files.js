@@ -1,5 +1,41 @@
 // === GoCognigo — File Upload ===
 
+// Upload a single file with progress tracking using XHR
+function uploadFileWithProgress(file) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const formData = new FormData();
+        formData.append('files', file);
+        formData.append('project_id', activeProjectId);
+
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+                const pct = Math.round((e.loaded / e.total) * 100);
+                updateFileProgressUI(file.name, pct);
+            }
+        });
+
+        xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+            } else {
+                try {
+                    const err = JSON.parse(xhr.responseText);
+                    reject(new Error(err.error || 'Upload failed'));
+                } catch {
+                    reject(new Error('Upload failed'));
+                }
+            }
+        });
+
+        xhr.addEventListener('error', () => reject(new Error('Network error')));
+        xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+
+        xhr.open('POST', `${API_BASE}/api/upload`);
+        xhr.send(formData);
+    });
+}
+
 async function handleFileDrop(fileList) {
     if (!activeProjectId) {
         alert('Create or select a chat first.');
@@ -23,25 +59,11 @@ async function handleFileDrop(fileList) {
     for (let i = 0; i < validFiles.length; i++) {
         const file = validFiles[i];
 
-        // Show uploading indicator in file list
+        // Show uploading indicator with progress bar in file list
         addFileToListUI(file.name, file.size, 'uploading', `${i + 1}/${validFiles.length}`);
 
-        const formData = new FormData();
-        formData.append('files', file);
-        formData.append('project_id', activeProjectId);
-
         try {
-            const res = await fetch(`${API_BASE}/api/upload`, {
-                method: 'POST',
-                body: formData
-            });
-
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: 'Upload failed' }));
-                updateFileStatusUI(file.name, 'error', err.error || 'Failed');
-                continue;
-            }
-
+            await uploadFileWithProgress(file);
             updateFileStatusUI(file.name, 'done', '\u2713');
         } catch (e) {
             updateFileStatusUI(file.name, 'error', '\u2717 ' + e.message);
@@ -61,7 +83,7 @@ function addFileToListUI(name, size, status, counter) {
     const container = document.getElementById('fileList');
     const ext = name.toLowerCase().split('.').pop();
     const sizeStr = formatFileSize(size);
-    const statusText = status === 'uploading' ? `\u2B06 ${counter}` : status === 'error' ? '\u2717' : '\u2713';
+    const statusText = status === 'uploading' ? '0%' : status === 'error' ? '\u2717' : '\u2713';
     const statusClass = status === 'uploading' ? 'uploading' : status === 'error' ? 'error' : '';
 
     const div = document.createElement('div');
@@ -73,14 +95,32 @@ function addFileToListUI(name, size, status, counter) {
         <span class="file-size">${sizeStr}</span>
         <span class="file-status ${statusClass}">${statusText}</span>
         <button class="file-remove" onclick="removeFile('${escapeHtml(name)}')" title="Remove">\u00d7</button>
+        ${status === 'uploading' ? '<div class="file-progress-bar"><div class="file-progress-fill"></div></div>' : ''}
     `;
     container.appendChild(div);
+}
+
+function updateFileProgressUI(name, percent) {
+    const id = `file-${name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    const fill = el.querySelector('.file-progress-fill');
+    if (fill) fill.style.width = `${percent}%`;
+
+    const statusEl = el.querySelector('.file-status');
+    if (statusEl) statusEl.textContent = `${percent}%`;
 }
 
 function updateFileStatusUI(name, status, text) {
     const id = `file-${name.replace(/[^a-zA-Z0-9]/g, '_')}`;
     const el = document.getElementById(id);
     if (!el) return;
+
+    // Remove progress bar on completion
+    const bar = el.querySelector('.file-progress-bar');
+    if (bar) bar.remove();
+
     const statusEl = el.querySelector('.file-status');
     if (statusEl) {
         statusEl.textContent = text;

@@ -47,10 +47,14 @@ func (s *Server) handleActivateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	// Don't close previous index — it stays in cache
-	s.activeIndex = nil
-	s.activeRetriever = nil
-	s.activeProjectID = sess.ID
+	// If re-activating the same project with a loaded index, skip clearing
+	sameProject := s.activeProjectID == sess.ID && s.activeRetriever != nil
+	if !sameProject {
+		// Don't close previous index — it stays in cache
+		s.activeIndex = nil
+		s.activeRetriever = nil
+		s.activeProjectID = sess.ID
+	}
 	s.ingestStatus.reset()
 	s.indexLoading = false
 	s.mu.Unlock()
