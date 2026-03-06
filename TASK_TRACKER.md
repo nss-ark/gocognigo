@@ -105,7 +105,7 @@
 - [x] **Export conversations** — Download chat history as PDF or Markdown
 - [ ] **Document viewer** — Inline PDF viewer with highlighted citations
 - [x] **Markdown rendering** — Render LLM answers with full Markdown (tables, code blocks)
-- [ ] **Dark/light theme toggle** — Currently dark-only
+- [x] **Dark/light theme toggle** — Currently dark-only
 - [ ] **Mobile responsive** — Sidebar collapses on small screens
 - [x] **Keyboard shortcuts** — Ctrl+Enter to send, Ctrl+N for new conversation
 

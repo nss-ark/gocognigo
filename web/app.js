@@ -2,6 +2,20 @@
 // This file wires up DOM event listeners and starts the app.
 // All logic lives in the module files loaded before this one.
 
+// Apply saved theme immediately (before DOM renders)
+(function () {
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', saved);
+})();
+
+function toggleTheme() {
+    const html = document.documentElement;
+    const current = html.getAttribute('data-theme') || 'dark';
+    const next = current === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     // Load stats first (sets currentProvider from server default_llm),
     // then load provider models so dropdown matches the active provider.
