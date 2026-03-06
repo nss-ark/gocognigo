@@ -338,7 +338,8 @@ function finalizeStreamAnswer(answerDiv, streamState, originalQuestion) {
                     <div class="msg-footnotes-title">Sources</div>
                     ${footnotes.map(fn => {
                 const clickable = isPdf(fn.document);
-                return `<div class="footnote-item${clickable ? ' clickable' : ''}" ${clickable ? `onclick="openDocViewer('${escapeHtml(activeProjectId)}', '${escapeHtml(fn.document).replace(/'/g, "\\'")}', ${fn.page || 1})"` : ''}>
+                const quoteParam = fn.quote ? `, '${escapeHtml(fn.quote).replace(/'/g, "\\'")}'` : '';
+                return `<div class="footnote-item${clickable ? ' clickable' : ''}" ${clickable ? `onclick="openDocViewer('${escapeHtml(activeProjectId)}', '${escapeHtml(fn.document).replace(/'/g, "\\'")}', ${fn.page || 1}${quoteParam})"` : ''}>
                             <span class="footnote-num">${fn.id}</span>
                             <span class="footnote-doc">${escapeHtml(fn.document)}</span>
                             ${fn.page ? `<span class="footnote-page">p.${fn.page}</span>` : ''}
@@ -355,7 +356,7 @@ function finalizeStreamAnswer(answerDiv, streamState, originalQuestion) {
                 if (fn && isPdf(fn.document)) {
                     ref.classList.add('clickable');
                     ref.title = `View ${fn.document} p.${fn.page || 1}`;
-                    ref.onclick = () => openDocViewer(activeProjectId, fn.document, fn.page || 1);
+                    ref.onclick = () => openDocViewer(activeProjectId, fn.document, fn.page || 1, fn.quote);
                 }
             });
         }
@@ -450,7 +451,8 @@ function appendAnswer(data, originalQuestion) {
                 <div class="msg-footnotes-title">Sources</div>
                 ${footnotes.map(fn => {
             const clickable = isPdfFile(fn.document);
-            return `<div class="footnote-item${clickable ? ' clickable' : ''}" ${clickable ? `onclick="openDocViewer('${escapeHtml(activeProjectId)}', '${escapeHtml(fn.document).replace(/'/g, "\\'")}', ${fn.page || 1})"` : ''}>
+            const quoteParam = fn.quote ? `, '${escapeHtml(fn.quote).replace(/'/g, "\\'")}'` : '';
+            return `<div class="footnote-item${clickable ? ' clickable' : ''}" ${clickable ? `onclick="openDocViewer('${escapeHtml(activeProjectId)}', '${escapeHtml(fn.document).replace(/'/g, "\\'")}', ${fn.page || 1}${quoteParam})"` : ''}>
                         <span class="footnote-num">${fn.id}</span>
                         <span class="footnote-doc">${escapeHtml(fn.document)}</span>
                         ${fn.page ? `<span class="footnote-page">p.${fn.page}</span>` : ''}
@@ -513,7 +515,7 @@ function appendAnswer(data, originalQuestion) {
             if (fn && isPdfFile(fn.document)) {
                 ref.classList.add('clickable');
                 ref.title = `View ${fn.document} p.${fn.page || 1}`;
-                ref.onclick = () => openDocViewer(activeProjectId, fn.document, fn.page || 1);
+                ref.onclick = () => openDocViewer(activeProjectId, fn.document, fn.page || 1, fn.quote);
             }
         });
     }
