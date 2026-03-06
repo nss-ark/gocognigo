@@ -65,7 +65,16 @@ function renderSidebar() {
                             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"></path>
                         </svg>
                         <span class="conv-name">${escapeHtml(c.name)}</span>
-                        ${conversations.length > 1 ? `<button class="conv-delete" onclick="event.stopPropagation(); deleteConversation('${c.id}')" title="Delete">\u00d7</button>` : ''}
+                        <div class="conv-actions">
+                            <button class="conv-export" onclick="event.stopPropagation(); exportConversation('${c.id}')" title="Export as Markdown">
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                            </button>
+                            ${conversations.length > 1 ? `<button class="conv-delete" onclick="event.stopPropagation(); deleteConversation('${c.id}')" title="Delete">\u00d7</button>` : ''}
+                        </div>
                     </div>`;
             }).join('')}
                 <div class="conv-item conv-new" onclick="event.stopPropagation(); createNewConversation()">

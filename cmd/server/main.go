@@ -154,6 +154,7 @@ func main() {
 	mux.HandleFunc("/api/settings", srv.handleSettings)
 	mux.HandleFunc("/api/settings/validate", srv.handleValidateKey)
 	mux.HandleFunc("/api/search", srv.handleSearch)
+	mux.HandleFunc("/api/conversations/export", srv.handleExportConversation)
 	mux.HandleFunc("/api/index-status", srv.handleIndexStatus)
 
 	// Project endpoints

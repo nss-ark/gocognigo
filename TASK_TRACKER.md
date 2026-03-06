@@ -102,7 +102,7 @@
 
 ### Phase 2: User Experience
 - [x] **Search within documents** — Full-text search across indexed chunks without LLM
-- [ ] **Export conversations** — Download chat history as PDF or Markdown
+- [x] **Export conversations** — Download chat history as PDF or Markdown
 - [ ] **Document viewer** — Inline PDF viewer with highlighted citations
 - [ ] **Markdown rendering** — Render LLM answers with full Markdown (tables, code blocks)
 - [ ] **Dark/light theme toggle** — Currently dark-only

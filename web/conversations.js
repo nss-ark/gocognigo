@@ -140,3 +140,15 @@ async function autoNameConversation(question) {
         console.error('Auto-name failed', e);
     }
 }
+
+function exportConversation(convId) {
+    if (!activeProjectId) return;
+    const url = `${API_BASE}/api/conversations/export?project_id=${encodeURIComponent(activeProjectId)}&conversation_id=${encodeURIComponent(convId)}`;
+    // Use a hidden anchor to trigger download
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}

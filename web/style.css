@@ -2922,3 +2922,35 @@ body {
     border-radius: 2px;
     padding: 0 1px;
 }
+
+/* ========== Conversation Actions (Export + Delete) ========== */
+
+.conv-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.conv-item:hover .conv-actions {
+    opacity: 1;
+}
+
+.conv-export {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 3px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    transition: var(--transition);
+}
+
+.conv-export:hover {
+    color: var(--accent-primary);
+    background: rgba(139, 92, 246, 0.12);
+}
