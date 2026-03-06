@@ -107,6 +107,56 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('settingsDropdown').classList.add('hidden');
         }
     });
+    // Global keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        const tag = (e.target.tagName || '').toLowerCase();
+        const isInput = tag === 'input' || tag === 'textarea' || tag === 'select';
+
+        // Ctrl+Enter — send query (works even from textarea)
+        if (e.ctrlKey && e.key === 'Enter') {
+            e.preventDefault();
+            if (currentMode === 'single') submitQuery();
+            else if (currentMode === 'batch') runBatch();
+            return;
+        }
+
+        // Escape — close settings dropdown
+        if (e.key === 'Escape') {
+            const dd = document.getElementById('settingsDropdown');
+            if (!dd.classList.contains('hidden')) {
+                dd.classList.add('hidden');
+                return;
+            }
+        }
+
+        // Shortcuts below only fire when not typing in an input
+        if (isInput) return;
+
+        // Ctrl+N — new conversation
+        if (e.ctrlKey && e.key === 'n') {
+            e.preventDefault();
+            createNewConversation();
+            return;
+        }
+
+        // Ctrl+Shift+F — toggle search mode
+        if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+            e.preventDefault();
+            switchMode(currentMode === 'search' ? 'single' : 'search');
+            return;
+        }
+
+        // / — focus query input (vim-style)
+        if (e.key === '/') {
+            e.preventDefault();
+            if (currentMode === 'search') {
+                document.getElementById('searchInput').focus();
+            } else {
+                document.getElementById('queryInput').focus();
+            }
+            return;
+        }
+    });
 
     // Load projects and initialise
     loadProjects();

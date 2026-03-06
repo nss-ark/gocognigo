@@ -107,7 +107,7 @@
 - [x] **Markdown rendering** — Render LLM answers with full Markdown (tables, code blocks)
 - [ ] **Dark/light theme toggle** — Currently dark-only
 - [ ] **Mobile responsive** — Sidebar collapses on small screens
-- [ ] **Keyboard shortcuts** — Ctrl+Enter to send, Ctrl+N for new conversation
+- [x] **Keyboard shortcuts** — Ctrl+Enter to send, Ctrl+N for new conversation
 
 ### Phase 3: Scalability & Deployment
 - [ ] **Docker deployment** — Dockerfile with Tesseract pre-installed
