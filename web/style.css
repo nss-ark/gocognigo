@@ -2390,6 +2390,19 @@ body {
     font-size: 0.75rem;
 }
 
+/* Override browser autofill styling (yellow background + border) */
+.settings-input:-webkit-autofill,
+.settings-input:-webkit-autofill:hover,
+.settings-input:-webkit-autofill:focus,
+.settings-input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--bg-input) inset !important;
+    -webkit-text-fill-color: var(--text-primary) !important;
+    border: 1px solid var(--border) !important;
+    outline: none !important;
+    caret-color: var(--text-primary) !important;
+    transition: background-color 5000s ease-in-out 0s;
+}
+
 .settings-divider {
     height: 1px;
     background: var(--border);
@@ -2441,6 +2454,65 @@ body {
     margin-left: 0.3rem;
 }
 
+/* === API Key Test Buttons === */
+.settings-key-row {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.settings-key-row .settings-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.key-test-btn {
+    flex-shrink: 0;
+    padding: 0.45rem 0.7rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+}
+
+.key-test-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    border-color: var(--border-focus);
+}
+
+.key-test-btn:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
+.key-status {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 500;
+    min-height: 1.1em;
+    margin-top: 0.2rem;
+    transition: color 0.2s ease;
+}
+
+.key-status.valid {
+    color: var(--success);
+}
+
+.key-status.invalid {
+    color: var(--danger);
+}
+
+.key-status.testing {
+    color: var(--warning);
+}
+
 /* === Cancel Ingestion Button === */
 .cancel-ingest-btn {
     display: flex;
@@ -2473,6 +2545,45 @@ body {
 .cancel-ingest-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* === Retry Bar (embedding failure recovery) === */
+.retry-bar {
+    margin-top: 1.5rem;
+    padding: 1.2rem;
+    background: rgba(245, 158, 11, 0.06);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: var(--radius-md);
+    animation: fadeIn 0.4s ease;
+}
+
+.retry-error-msg {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
+
+.retry-error-msg svg {
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.retry-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.retry-btn {
+    background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+}
+
+.retry-btn:hover {
+    filter: brightness(1.15);
 }
 
 /* === Ingestion Results Summary === */

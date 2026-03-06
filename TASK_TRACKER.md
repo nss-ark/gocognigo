@@ -95,7 +95,7 @@
 - [x] Create `v0.2` branch from `main`
 - [x] Fix large document (2000+ pages) processing — chunked OCR
 - [x] **Streaming responses** — Stream LLM answers token-by-token instead of waiting for full response
-- [ ] **Upload progress** — Show per-file upload progress bar (large PDFs can take time)
+- [x] **Upload progress** — Show per-file upload progress bar (large PDFs can take time)
 - [ ] **Error recovery on ingestion** — If embedding fails mid-pipeline, allow retry without re-extracting
 - [ ] **API key validation** — Test API keys on save and show immediate pass/fail feedback
 - [x] **Embedding speed optimization** — Connection pooling for HuggingFace, adaptive batch sizing (50 HF / 200 OpenAI), 60s HTTP timeout, provider-specific concurrency (6 HF / 8 OpenAI)

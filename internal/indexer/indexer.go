@@ -67,6 +67,10 @@ type Index struct {
 	mu           sync.Mutex // protects Chunks during concurrent writes
 }
 
+// Lock acquires the index mutex. Use when reading Chunks from outside the package.
+func (idx *Index) Lock()   { idx.mu.Lock() }
+func (idx *Index) Unlock() { idx.mu.Unlock() }
+
 func NewIndex(providerName, apiKey, modelName, bm25Path string) (*Index, error) {
 	var bmIndex bleve.Index
 	var err error
@@ -467,6 +471,30 @@ func (idx *Index) Close() error {
 		return idx.BM25Index.Close()
 	}
 	return nil
+}
+
+// SaveChunks serializes a slice of Chunks to a JSON file on disk.
+// Used by the error-recovery feature to persist extraction results
+// so embedding can be retried without re-extracting.
+func SaveChunks(path string, chunks []Chunk) error {
+	data, err := json.Marshal(chunks)
+	if err != nil {
+		return fmt.Errorf("marshal chunks: %w", err)
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// LoadChunks deserializes a slice of Chunks from a JSON file on disk.
+func LoadChunks(path string) ([]Chunk, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var chunks []Chunk
+	if err := json.Unmarshal(data, &chunks); err != nil {
+		return nil, fmt.Errorf("unmarshal chunks: %w", err)
+	}
+	return chunks, nil
 }
 
 // ==========================================

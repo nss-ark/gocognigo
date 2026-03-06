@@ -703,6 +703,65 @@ async function saveSettings() {
     setTimeout(() => { hint.textContent = ''; }, 4000);
 }
 
+// ===== API Key Validation =====
+
+async function validateApiKey(provider, inputId, btn) {
+    const input = document.getElementById(inputId);
+    const key = input.value.trim();
+
+    // Map input IDs to status element IDs
+    const statusMap = {
+        'settingsOpenAIKey': 'keyStatusOpenAI',
+        'settingsAnthropicKey': 'keyStatusAnthropic',
+        'settingsHFKey': 'keyStatusHuggingFace',
+        'settingsSarvamKey': 'keyStatusSarvam',
+    };
+    const statusEl = document.getElementById(statusMap[inputId]);
+
+    btn.disabled = true;
+    btn.textContent = '...';
+    if (statusEl) {
+        statusEl.textContent = 'Testing...';
+        statusEl.className = 'key-status testing';
+    }
+
+    // Build request body — include api_key only if user typed a new one
+    const reqBody = { provider };
+    if (key) reqBody.api_key = key;
+
+    try {
+        const res = await fetch(`${API_BASE}/api/settings/validate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqBody)
+        });
+        const data = await res.json();
+
+        if (statusEl) {
+            if (data.valid) {
+                statusEl.textContent = '✓ Valid';
+                statusEl.className = 'key-status valid';
+            } else {
+                statusEl.textContent = '✗ ' + (data.error || 'Invalid');
+                statusEl.className = 'key-status invalid';
+            }
+            // Auto-clear after 8 seconds
+            setTimeout(() => {
+                statusEl.textContent = '';
+                statusEl.className = 'key-status';
+            }, 8000);
+        }
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = '✗ Error: ' + e.message;
+            statusEl.className = 'key-status invalid';
+        }
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Test';
+    }
+}
+
 // ===== Reset =====
 
 async function resetChat() {

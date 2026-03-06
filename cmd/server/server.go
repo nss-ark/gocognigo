@@ -124,14 +124,16 @@ func (c *lruCache) has(key string) bool {
 
 // IngestStatus is polled by the frontend to show progress.
 type IngestStatus struct {
-	mu          sync.RWMutex
-	Phase       string       `json:"phase"` // idle, processing, done, error, cancelled
-	FilesTotal  int          `json:"files_total"`
-	FilesDone   int          `json:"files_done"`
-	ChunksTotal int          `json:"chunks_total"`
-	ChunksDone  int          `json:"chunks_done"`
-	Error       string       `json:"error,omitempty"`
-	FileResults []FileResult `json:"file_results,omitempty"`
+	mu             sync.RWMutex
+	Phase          string       `json:"phase"` // idle, processing, done, error, cancelled
+	FilesTotal     int          `json:"files_total"`
+	FilesDone      int          `json:"files_done"`
+	ChunksTotal    int          `json:"chunks_total"`
+	ChunksDone     int          `json:"chunks_done"`
+	Error          string       `json:"error,omitempty"`
+	FileResults    []FileResult `json:"file_results,omitempty"`
+	CanRetry       bool         `json:"can_retry,omitempty"`        // true when extraction succeeded but embedding failed
+	RetryProjectID string       `json:"retry_project_id,omitempty"` // project ID that can be retried
 }
 
 // FileResult tracks per-file processing outcome.
@@ -146,13 +148,15 @@ func (s *IngestStatus) snapshot() IngestStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return IngestStatus{
-		Phase:       s.Phase,
-		FilesTotal:  s.FilesTotal,
-		FilesDone:   s.FilesDone,
-		ChunksTotal: s.ChunksTotal,
-		ChunksDone:  s.ChunksDone,
-		Error:       s.Error,
-		FileResults: s.FileResults,
+		Phase:          s.Phase,
+		FilesTotal:     s.FilesTotal,
+		FilesDone:      s.FilesDone,
+		ChunksTotal:    s.ChunksTotal,
+		ChunksDone:     s.ChunksDone,
+		Error:          s.Error,
+		FileResults:    s.FileResults,
+		CanRetry:       s.CanRetry,
+		RetryProjectID: s.RetryProjectID,
 	}
 }
 
@@ -166,6 +170,8 @@ func (s *IngestStatus) reset() {
 	s.ChunksDone = 0
 	s.Error = ""
 	s.FileResults = nil
+	s.CanRetry = false
+	s.RetryProjectID = ""
 }
 
 // ----- Request / Response types -----

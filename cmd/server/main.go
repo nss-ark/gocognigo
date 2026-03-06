@@ -149,8 +149,10 @@ func main() {
 	mux.HandleFunc("/api/ingest/status", srv.handleIngestStatus)
 	mux.HandleFunc("/api/files", srv.handleFiles)
 	mux.HandleFunc("/api/ingest/cancel", srv.handleCancelIngest)
+	mux.HandleFunc("/api/ingest/retry", srv.handleRetryIngest)
 	mux.HandleFunc("/api/files/delete", srv.handleDeleteSingleFile)
 	mux.HandleFunc("/api/settings", srv.handleSettings)
+	mux.HandleFunc("/api/settings/validate", srv.handleValidateKey)
 	mux.HandleFunc("/api/index-status", srv.handleIndexStatus)
 
 	// Project endpoints

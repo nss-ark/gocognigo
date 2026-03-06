@@ -325,6 +325,10 @@ func (s *ProjectStore) VectorsPath(id string) string {
 	return filepath.Join(s.dataDir, id, "vectors.json")
 }
 
+func (s *ProjectStore) ChunksDir(id string) string {
+	return filepath.Join(s.dataDir, id, "chunks")
+}
+
 // ==================== UUID ====================
 
 func generateUUID() string {

@@ -49,8 +49,14 @@ function startIngestPolling() {
             } else if (status.phase === 'error') {
                 clearInterval(ingestPollInterval);
                 ingestPollInterval = null;
-                alert('Processing failed: ' + (status.error || 'Unknown error'));
-                showPhase('upload');
+
+                if (status.can_retry) {
+                    // Show error with retry button instead of going back to upload
+                    showRetryUI(status.error || 'Embedding failed');
+                } else {
+                    alert('Processing failed: ' + (status.error || 'Unknown error'));
+                    showPhase('upload');
+                }
             } else if (status.phase === 'cancelled') {
                 clearInterval(ingestPollInterval);
                 ingestPollInterval = null;
@@ -153,6 +159,82 @@ async function cancelIngestion() {
 
     btn.disabled = false;
     btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg> Cancel Processing`;
+}
+
+// Show retry UI when embedding fails but extraction succeeded
+function showRetryUI(errorMsg) {
+    const title = document.getElementById('processingTitle');
+    const phaseLabel = document.getElementById('processingPhaseLabel');
+    const progressFill = document.getElementById('progressFill');
+    const retryBar = document.getElementById('retryBar');
+    const retryError = document.getElementById('retryError');
+
+    title.textContent = 'Embedding Failed';
+    phaseLabel.textContent = 'Text extraction succeeded — you can retry embedding after fixing the issue.';
+    progressFill.style.width = '30%'; // show extraction completed
+    progressFill.style.background = 'var(--warning)';
+
+    // Hide spinner and cancel, show retry bar
+    document.querySelector('.processing-spinner').style.display = 'none';
+    document.getElementById('cancelIngestBtn').classList.add('hidden');
+    retryBar.classList.remove('hidden');
+    retryError.textContent = errorMsg;
+}
+
+async function retryIngestion() {
+    if (!activeProjectId) return;
+
+    const retryBtn = document.getElementById('retryEmbedBtn');
+    retryBtn.disabled = true;
+    retryBtn.textContent = 'Retrying...';
+
+    // Reset UI
+    document.querySelector('.processing-spinner').style.display = '';
+    document.getElementById('retryBar').classList.add('hidden');
+    document.getElementById('cancelIngestBtn').classList.remove('hidden');
+    document.getElementById('progressFill').style.background = '';
+
+    try {
+        const res = await fetch(`${API_BASE}/api/ingest/retry`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_id: activeProjectId })
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            alert('Retry failed: ' + (err.error || 'Unknown error'));
+            showPhase('upload');
+            return;
+        }
+
+        // Resume polling
+        startIngestPolling();
+    } catch (e) {
+        alert('Retry error: ' + e.message);
+        showPhase('upload');
+    } finally {
+        retryBtn.disabled = false;
+        retryBtn.textContent = 'Retry Embedding';
+    }
+}
+
+async function backToUploadFromRetry() {
+    // Cancel retry state and go back to upload
+    try {
+        await fetch(`${API_BASE}/api/ingest/cancel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_id: activeProjectId })
+        });
+    } catch (e) {
+        // ignore
+    }
+    document.querySelector('.processing-spinner').style.display = '';
+    document.getElementById('retryBar').classList.add('hidden');
+    document.getElementById('cancelIngestBtn').classList.remove('hidden');
+    document.getElementById('progressFill').style.background = '';
+    showPhase('upload');
 }
 
 // Show per-file results when ingestion completes

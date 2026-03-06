@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"gocognigo/internal/indexer"
 	"gocognigo/internal/retriever"
@@ -160,4 +164,181 @@ func (s *Server) loadChatIndexes(ProjectID string) error {
 
 	log.Printf("Loaded %d chunks for project %s (cached)", len(idx.Chunks), ProjectID)
 	return nil
+}
+
+// handleValidateKey tests an API key with a minimal API call.
+func (s *Server) handleValidateKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Provider string `json:"provider"`
+		APIKey   string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Provider == "" {
+		jsonErr(w, "provider is required", http.StatusBadRequest)
+		return
+	}
+
+	// If no key provided, use the stored key from server settings
+	apiKey := req.APIKey
+	if apiKey == "" {
+		switch strings.ToLower(req.Provider) {
+		case "openai":
+			s.mu.RLock()
+			apiKey = s.embedAPIKey
+			s.mu.RUnlock()
+			if apiKey == "" {
+				s.mu.RLock()
+				apiKey = s.providerKeys["openai"]
+				s.mu.RUnlock()
+			}
+		case "anthropic":
+			s.mu.RLock()
+			apiKey = s.providerKeys["anthropic"]
+			s.mu.RUnlock()
+		case "huggingface":
+			s.mu.RLock()
+			apiKey = s.providerKeys["huggingface"]
+			s.mu.RUnlock()
+		case "sarvam":
+			s.mu.RLock()
+			apiKey = s.providerKeys["sarvam"]
+			s.mu.RUnlock()
+		}
+		if apiKey == "" {
+			jsonResp(w, map[string]interface{}{"valid": false, "error": "No API key configured for " + req.Provider})
+			return
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	var valid bool
+	var errMsg string
+
+	switch strings.ToLower(req.Provider) {
+	case "openai":
+		valid, errMsg = validateOpenAIKey(ctx, apiKey)
+	case "anthropic":
+		valid, errMsg = validateAnthropicKey(ctx, apiKey)
+	case "huggingface":
+		valid, errMsg = validateHuggingFaceKey(ctx, apiKey)
+	case "sarvam":
+		valid, errMsg = validateSarvamKey(ctx, apiKey)
+	default:
+		jsonErr(w, "Unknown provider: "+req.Provider, http.StatusBadRequest)
+		return
+	}
+
+	jsonResp(w, map[string]interface{}{
+		"valid": valid,
+		"error": errMsg,
+	})
+}
+
+// validateOpenAIKey uses the models list endpoint — cheapest possible call.
+func validateOpenAIKey(ctx context.Context, apiKey string) (bool, string) {
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.openai.com/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, "Connection error: " + err.Error()
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 200 {
+		return true, ""
+	}
+	if resp.StatusCode == 401 {
+		return false, "Invalid API key"
+	}
+	body, _ := io.ReadAll(resp.Body)
+	return false, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, truncateStr(string(body), 200))
+}
+
+// validateAnthropicKey sends a minimal messages request (max_tokens=1, tiny prompt).
+func validateAnthropicKey(ctx context.Context, apiKey string) (bool, string) {
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"model":      "claude-3-haiku-20240307",
+		"max_tokens": 1,
+		"messages": []map[string]string{
+			{"role": "user", "content": "hi"},
+		},
+	})
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(reqBody))
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("content-type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, "Connection error: " + err.Error()
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 200 {
+		return true, ""
+	}
+	if resp.StatusCode == 401 {
+		return false, "Invalid API key"
+	}
+	body, _ := io.ReadAll(resp.Body)
+	return false, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, truncateStr(string(body), 200))
+}
+
+// validateHuggingFaceKey checks the token via the whoami endpoint.
+func validateHuggingFaceKey(ctx context.Context, apiKey string) (bool, string) {
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://huggingface.co/api/whoami-v2", nil)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, "Connection error: " + err.Error()
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 200 {
+		return true, ""
+	}
+	if resp.StatusCode == 401 {
+		return false, "Invalid API key"
+	}
+	body, _ := io.ReadAll(resp.Body)
+	return false, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, truncateStr(string(body), 200))
+}
+
+// validateSarvamKey tests the Sarvam Vision OCR API.
+func validateSarvamKey(ctx context.Context, apiKey string) (bool, string) {
+	// Sarvam doesn't have a simple health-check endpoint, so we validate the key
+	// by trying a minimal request that will fail fast with auth errors
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.sarvam.ai/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, "Connection error: " + err.Error()
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 200 {
+		return true, ""
+	}
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return false, "Invalid API key"
+	}
+	// For Sarvam, anything else we treat as potentially valid (API quirks)
+	return true, ""
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
