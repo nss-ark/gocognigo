@@ -863,6 +863,26 @@ body {
     border-color: rgba(239, 68, 68, 0.3);
 }
 
+.indexed-file-tag.viewable {
+    cursor: pointer;
+}
+
+.indexed-file-tag.viewable:hover {
+    border-color: rgba(168, 85, 247, 0.4);
+    background: rgba(168, 85, 247, 0.06);
+}
+
+.indexed-file-view {
+    font-size: 0.7rem;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    margin-left: 2px;
+}
+
+.indexed-file-tag.viewable:hover .indexed-file-view {
+    opacity: 0.7;
+}
+
 .indexed-file-delete {
     background: none;
     border: none;
@@ -1955,6 +1975,18 @@ body {
     opacity: 0.85;
 }
 
+.footnote-ref.clickable {
+    cursor: pointer;
+    transition: var(--transition);
+    border-bottom: 1px dotted transparent;
+}
+
+.footnote-ref.clickable:hover {
+    opacity: 1;
+    color: var(--accent-purple);
+    border-bottom-color: var(--accent-purple);
+}
+
 /* Footnotes section */
 .msg-footnotes {
     display: flex;
@@ -1981,6 +2013,29 @@ body {
     font-size: 0.75rem;
     color: var(--text-secondary);
     font-family: var(--font-mono);
+    padding: 0.25rem 0.4rem;
+    border-radius: var(--radius-sm);
+    transition: var(--transition);
+}
+
+.footnote-item.clickable {
+    cursor: pointer;
+}
+
+.footnote-item.clickable:hover {
+    background: rgba(168, 85, 247, 0.08);
+    border-color: rgba(168, 85, 247, 0.2);
+}
+
+.footnote-view-icon {
+    font-size: 0.75rem;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    margin-left: auto;
+}
+
+.footnote-item.clickable:hover .footnote-view-icon {
+    opacity: 0.7;
 }
 
 .footnote-num {
@@ -3308,4 +3363,148 @@ body {
     border: none;
     border-top: 1px solid var(--border);
     margin: 0.8em 0;
+}
+
+/* === Document Viewer Overlay === */
+.doc-viewer-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10000;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+}
+
+.doc-viewer-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.doc-viewer-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+}
+
+.doc-viewer-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.95);
+    width: 90vw;
+    height: 90vh;
+    max-width: 1200px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
+    transition: transform 0.25s ease;
+}
+
+.doc-viewer-overlay.visible .doc-viewer-container {
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.doc-viewer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1.25rem;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.doc-viewer-file-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.doc-viewer-file-info svg {
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+
+.doc-viewer-filename {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-mono);
+}
+
+.doc-viewer-page-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--accent-cyan);
+    background: rgba(6, 182, 212, 0.1);
+    border: 1px solid rgba(6, 182, 212, 0.2);
+    border-radius: 100px;
+    padding: 0.15rem 0.5rem;
+    white-space: nowrap;
+}
+
+.doc-viewer-page-badge:empty {
+    display: none;
+}
+
+.doc-viewer-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.doc-viewer-nav-btn,
+.doc-viewer-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.doc-viewer-nav-btn:hover,
+.doc-viewer-close-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    border-color: var(--border-focus);
+}
+
+.doc-viewer-close-btn:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+.doc-viewer-body {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+.doc-viewer-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: var(--bg-secondary);
 }

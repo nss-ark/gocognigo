@@ -332,17 +332,32 @@ function finalizeStreamAnswer(answerDiv, streamState, originalQuestion) {
                 seen.add(key);
                 return true;
             });
+            const isPdf = (name) => name.toLowerCase().endsWith('.pdf');
             footnotesEl.innerHTML = `
                 <div class="msg-footnotes">
                     <div class="msg-footnotes-title">Sources</div>
-                    ${footnotes.map(fn =>
-                `<div class="footnote-item">
+                    ${footnotes.map(fn => {
+                const clickable = isPdf(fn.document);
+                return `<div class="footnote-item${clickable ? ' clickable' : ''}" ${clickable ? `onclick="openDocViewer('${escapeHtml(activeProjectId)}', '${escapeHtml(fn.document).replace(/'/g, "\\'")}', ${fn.page || 1})"` : ''}>
                             <span class="footnote-num">${fn.id}</span>
                             <span class="footnote-doc">${escapeHtml(fn.document)}</span>
                             ${fn.page ? `<span class="footnote-page">p.${fn.page}</span>` : ''}
-                        </div>`).join('')}
+                            ${clickable ? '<span class="footnote-view-icon" title="View document">&#128196;</span>' : ''}
+                        </div>`;
+            }).join('')}
                 </div>`;
             footnotesEl.style.display = '';
+
+            // Make inline [N] markers clickable
+            answerDiv.querySelectorAll('.footnote-ref').forEach(ref => {
+                const num = parseInt(ref.textContent);
+                const fn = footnotes.find(f => f.id === num);
+                if (fn && isPdf(fn.document)) {
+                    ref.classList.add('clickable');
+                    ref.title = `View ${fn.document} p.${fn.page || 1}`;
+                    ref.onclick = () => openDocViewer(activeProjectId, fn.document, fn.page || 1);
+                }
+            });
         }
 
         // Confidence
@@ -428,17 +443,20 @@ function appendAnswer(data, originalQuestion) {
         });
     }
 
+    const isPdfFile = (name) => name.toLowerCase().endsWith('.pdf');
     if (footnotes.length > 0) {
         footnotesHtml = `
             <div class="msg-footnotes">
                 <div class="msg-footnotes-title">Sources</div>
-                ${footnotes.map(fn =>
-            `<div class="footnote-item">
+                ${footnotes.map(fn => {
+            const clickable = isPdfFile(fn.document);
+            return `<div class="footnote-item${clickable ? ' clickable' : ''}" ${clickable ? `onclick="openDocViewer('${escapeHtml(activeProjectId)}', '${escapeHtml(fn.document).replace(/'/g, "\\'")}', ${fn.page || 1})"` : ''}>
                         <span class="footnote-num">${fn.id}</span>
                         <span class="footnote-doc">${escapeHtml(fn.document)}</span>
                         ${fn.page ? `<span class="footnote-page">p.${fn.page}</span>` : ''}
-                    </div>`
-        ).join('')}
+                        ${clickable ? '<span class="footnote-view-icon" title="View document">&#128196;</span>' : ''}
+                    </div>`;
+        }).join('')}
             </div>`;
     }
 
@@ -486,6 +504,19 @@ function appendAnswer(data, originalQuestion) {
     `;
     thread.appendChild(answerDiv);
     scrollThread();
+
+    // Make inline [N] markers clickable for PDF sources
+    if (footnotes.length > 0) {
+        answerDiv.querySelectorAll('.footnote-ref').forEach(ref => {
+            const num = parseInt(ref.textContent);
+            const fn = footnotes.find(f => f.id === num);
+            if (fn && isPdfFile(fn.document)) {
+                ref.classList.add('clickable');
+                ref.title = `View ${fn.document} p.${fn.page || 1}`;
+                ref.onclick = () => openDocViewer(activeProjectId, fn.document, fn.page || 1);
+            }
+        });
+    }
 }
 
 function getDefaultConfidenceReason(conf) {

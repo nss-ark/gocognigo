@@ -135,9 +135,11 @@ function renderIndexedFiles() {
     listEl.innerHTML = uploadedFiles.map(f => {
         const ext = f.name.toLowerCase().split('.').pop();
         const safeName = escapeHtml(f.name).replace(/'/g, "\\'");
-        return `<span class="indexed-file-tag">
+        const isPdf = ext === 'pdf';
+        return `<span class="indexed-file-tag${isPdf ? ' viewable' : ''}" ${isPdf ? `onclick="openDocViewer('${escapeHtml(activeProjectId)}', '${safeName}', 1)" title="Click to view document"` : ''}>
             <span class="file-ext ${ext}">${ext}</span>
             ${escapeHtml(f.name)}
+            ${isPdf ? '<span class="indexed-file-view" title="View PDF">&#128065;</span>' : ''}
             <button class="indexed-file-delete" onclick="event.stopPropagation(); removeFile('${safeName}')" title="Remove document from index">&times;</button>
         </span>`;
     }).join('');

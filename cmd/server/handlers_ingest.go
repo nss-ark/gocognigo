@@ -959,3 +959,45 @@ func (s *Server) runRetryEmbedding(ctx context.Context, projectID, vectorsPath s
 
 	log.Printf("Retry embedding complete for project %s: %d chunks", projectID, len(idx.Chunks))
 }
+
+// ========== File View Endpoint ==========
+
+func (s *Server) handleFileView(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	projectID := r.URL.Query().Get("project_id")
+	name := r.URL.Query().Get("name")
+	if projectID == "" || name == "" {
+		jsonErr(w, "project_id and name are required", http.StatusBadRequest)
+		return
+	}
+
+	// Prevent path traversal
+	clean := filepath.Base(name)
+	if clean != name || clean == "." || clean == ".." {
+		jsonErr(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	// Only serve PDF files
+	ext := strings.ToLower(filepath.Ext(clean))
+	if ext != ".pdf" {
+		jsonErr(w, "only PDF files can be viewed", http.StatusBadRequest)
+		return
+	}
+
+	uploadsDir := s.projects.UploadsDir(projectID)
+	filePath := filepath.Join(uploadsDir, clean)
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		jsonErr(w, "file not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", clean))
+	http.ServeFile(w, r, filePath)
+}
