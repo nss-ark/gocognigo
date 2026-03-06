@@ -42,6 +42,12 @@ async function createNewConversation() {
 async function selectConversation(convId) {
     activeConversationId = convId;
     convHasBeenNamed = false;
+
+    // Switch back to chat mode if in batch/search
+    if (currentMode !== 'single') {
+        switchMode('single');
+    }
+
     const thread = document.getElementById('conversationThread');
     thread.innerHTML = '';
 

@@ -823,17 +823,33 @@ function updateModelDropdown() {
 
 function switchMode(mode) {
     currentMode = mode;
+    // Update top mode-btn highlighting (only single and search have mode-btns)
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-    document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
+    const topBtn = document.querySelector(`[data-mode="${mode}"]`);
+    if (topBtn) topBtn.classList.add('active');
+
+    // Toggle panels
     document.getElementById('singlePanel').classList.toggle('hidden', mode !== 'single');
     document.getElementById('searchPanel').classList.toggle('hidden', mode !== 'search');
     document.getElementById('batchPanel').classList.toggle('hidden', mode !== 'batch');
     document.getElementById('singleResult').classList.add('hidden');
     document.getElementById('batchResults').classList.add('hidden');
+
+    // Highlight sidebar batch tool item
+    const batchToolBtn = document.getElementById('batchToolBtn');
+    if (batchToolBtn) batchToolBtn.classList.toggle('active', mode === 'batch');
+
     // Focus search input when entering search mode
     if (mode === 'search') {
         setTimeout(() => document.getElementById('searchInput').focus(), 100);
     }
+}
+
+function toggleSidebarTools() {
+    const list = document.getElementById('sidebarToolsList');
+    const chevron = document.querySelector('.sidebar-tools-chevron');
+    list.classList.toggle('hidden');
+    if (chevron) chevron.classList.toggle('open');
 }
 
 // ===== Stats =====
