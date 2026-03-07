@@ -18,7 +18,13 @@ import (
 	"gocognigo/internal/indexer"
 	"gocognigo/internal/llm"
 	"gocognigo/internal/retriever"
+
+	"github.com/gorilla/websocket"
 )
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
 
 // ========== File Upload & Ingestion Endpoints ==========
 
@@ -417,7 +423,7 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		_ = os.RemoveAll(bm25Dir)
 
 		var err error
-		idx, err = indexer.NewIndex(s.embedProvider, s.embedAPIKey, "", bm25Dir)
+		idx, err = indexer.NewIndex(s.embedProvider, s.embedAPIKey, s.embedModel, bm25Dir)
 		if err != nil {
 			s.ingestStatus.mu.Lock()
 			s.ingestStatus.Phase = "error"
@@ -470,9 +476,10 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 
 			s.mu.RLock()
 			ocrCfg := &extractor.OCRConfig{
-				Provider:    s.ocrProvider,
-				SarvamKey:   s.sarvamAPIKey,
-				TesseractOk: s.tesseractOk,
+				Provider:      s.ocrProvider,
+				SarvamKey:     s.sarvamAPIKey,
+				TesseractLang: s.tesseractLang,
+				TesseractOk:   s.tesseractOk,
 			}
 			s.mu.RUnlock()
 
@@ -705,6 +712,33 @@ func (s *Server) handleIngestStatus(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, snap)
 }
 
+func (s *Server) handleIngestWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade failed: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			snap := s.ingestStatus.snapshot()
+			if err := conn.WriteJSON(snap); err != nil {
+				return
+			}
+			if snap.Phase == "done" || snap.Phase == "error" || snap.Phase == "cancelled" || snap.Phase == "idle" {
+				// Don't close aggressively, wait for client behavior or context cancel
+			}
+		}
+	}
+}
+
 func (s *Server) handleCancelIngest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -879,7 +913,7 @@ func (s *Server) runRetryEmbedding(ctx context.Context, projectID, vectorsPath s
 	if idx == nil {
 		_ = os.RemoveAll(bm25Dir)
 		var err error
-		idx, err = indexer.NewIndex(s.embedProvider, s.embedAPIKey, "", bm25Dir)
+		idx, err = indexer.NewIndex(s.embedProvider, s.embedAPIKey, s.embedModel, bm25Dir)
 		if err != nil {
 			s.ingestStatus.mu.Lock()
 			s.ingestStatus.Phase = "error"

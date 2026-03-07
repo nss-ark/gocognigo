@@ -22,11 +22,11 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
-// OCRConfig controls which OCR provider to use for scanned PDFs.
 type OCRConfig struct {
-	Provider    string // "tesseract", "sarvam", or "" (none)
-	SarvamKey   string // Sarvam Document Intelligence API subscription key
-	TesseractOk bool   // cached: true if tesseract was found
+	Provider      string // "tesseract", "sarvam", or "" (none)
+	SarvamKey     string // Sarvam Document Intelligence API subscription key
+	TesseractLang string // "eng" by default, or other language codes
+	TesseractOk   bool   // cached: true if tesseract was found
 }
 
 // tesseractBin holds the resolved path to the tesseract binary.
@@ -111,7 +111,11 @@ func RunOCR(cfg OCRConfig, pdfPath string) ([]DocumentChunk, error) {
 
 	switch strings.ToLower(cfg.Provider) {
 	case "tesseract":
-		chunks, err := tesseractOCR(pdfPath, fileName)
+		lang := cfg.TesseractLang
+		if lang == "" {
+			lang = "eng"
+		}
+		chunks, err := tesseractOCR(pdfPath, fileName, lang)
 		if err != nil && cfg.SarvamKey != "" {
 			log.Printf("Tesseract OCR failed for %s, falling back to Sarvam: %v", fileName, err)
 			return sarvamOCR(pdfPath, fileName, cfg.SarvamKey)
@@ -122,14 +126,22 @@ func RunOCR(cfg OCRConfig, pdfPath string) ([]DocumentChunk, error) {
 		chunks, err := sarvamOCR(pdfPath, fileName, cfg.SarvamKey)
 		if err != nil && cfg.TesseractOk {
 			log.Printf("Sarvam OCR failed for %s, falling back to Tesseract: %v", fileName, err)
-			return tesseractOCR(pdfPath, fileName)
+			lang := cfg.TesseractLang
+			if lang == "" {
+				lang = "eng"
+			}
+			return tesseractOCR(pdfPath, fileName, lang)
 		}
 		return chunks, err
 
 	default:
 		// Try tesseract if available, else sarvam
 		if cfg.TesseractOk {
-			return tesseractOCR(pdfPath, fileName)
+			lang := cfg.TesseractLang
+			if lang == "" {
+				lang = "eng"
+			}
+			return tesseractOCR(pdfPath, fileName, lang)
 		}
 		if cfg.SarvamKey != "" {
 			return sarvamOCR(pdfPath, fileName, cfg.SarvamKey)
@@ -188,7 +200,7 @@ func pdfPageCount(pdfPath string) (int, error) {
 // For large documents (>50 pages), it processes in batches to avoid
 // exhausting disk space and memory. It limits concurrency across all
 // active extractions to prevent CPU thrashing.
-func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
+func tesseractOCR(pdfPath, fileName, lang string) ([]DocumentChunk, error) {
 	bin := tesseractBin
 	if bin == "" {
 		return nil, fmt.Errorf("tesseract binary not found")
@@ -207,7 +219,7 @@ func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 
 	// If we can't determine page count or it's small, process all at once (original behavior)
 	if pgErr != nil || totalPages <= batchSize {
-		return tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix, 0, 0)
+		return tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix, lang, 0, 0)
 	}
 
 	// Large document: process in batches of batchSize pages
@@ -221,7 +233,7 @@ func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 		}
 
 		log.Printf("Processing %s: pages %d–%d of %d", fileName, startPage, endPage, totalPages)
-		batchChunks, err := tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix, startPage, endPage)
+		batchChunks, err := tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix, lang, startPage, endPage)
 		if err != nil {
 			log.Printf("Batch %d–%d failed for %s: %v (continuing with remaining batches)", startPage, endPage, fileName, err)
 			continue // don't fail the whole document for one bad batch
@@ -244,7 +256,7 @@ func tesseractOCR(pdfPath, fileName string) ([]DocumentChunk, error) {
 
 // tesseractOCRRange converts and OCRs a range of pages from a PDF.
 // If firstPage/lastPage are both 0, it processes the entire PDF at once.
-func tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix string, firstPage, lastPage int) ([]DocumentChunk, error) {
+func tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix, lang string, firstPage, lastPage int) ([]DocumentChunk, error) {
 	// Create temp directory for images (cleaned up after each batch)
 	tmpDir, err := os.MkdirTemp("", "gocognigo-ocr-*")
 	if err != nil {
@@ -346,7 +358,7 @@ func tesseractOCRRange(pdfPath, fileName, bin, tessDataPrefix string, firstPage,
 			defer func() { <-tesseractSem }()
 
 			pageNum := basePageNum + idx
-			cmd := exec.Command(bin, file, "stdout", "-l", "eng", "--psm", "6")
+			cmd := exec.Command(bin, file, "stdout", "-l", lang, "--psm", "6")
 			cmd.Env = append(os.Environ(),
 				"TESSDATA_PREFIX="+tessDataPrefix,
 				"OMP_THREAD_LIMIT=1", // disable Tesseract internal multithreading to avoid CPU thrashing

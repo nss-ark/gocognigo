@@ -21,6 +21,7 @@ func main() {
 	_ = godotenv.Load()
 
 	embedProvider := os.Getenv("EMBEDDING_PROVIDER")
+	embedModel := os.Getenv("EMBEDDING_MODEL")
 	embedAPIKey := os.Getenv("EMBEDDING_API_KEY")
 	if embedAPIKey == "" {
 		embedAPIKey = os.Getenv("OPENAI_API_KEY")
@@ -52,6 +53,9 @@ func main() {
 		if saved.DefaultLLM != "" {
 			defaultLLM = saved.DefaultLLM
 		}
+		if saved.EmbedModel != "" {
+			embedModel = saved.EmbedModel
+		}
 		if saved.EmbedProvider != "" {
 			embedProvider = saved.EmbedProvider
 			// Resolve embed API key from the chosen provider
@@ -67,12 +71,19 @@ func main() {
 	// OCR configuration
 	ocrProvider := os.Getenv("OCR_PROVIDER") // "tesseract", "sarvam", or ""
 	sarvamAPIKey := os.Getenv("SARVAM_API_KEY")
+	tesseractLang := os.Getenv("TESSERACT_LANG")
+	if tesseractLang == "" {
+		tesseractLang = "eng"
+	}
 	if saved := loadSavedSettings(); saved != nil {
 		if saved.OCRProvider != "" {
 			ocrProvider = saved.OCRProvider
 		}
 		if saved.SarvamKey != "" {
 			sarvamAPIKey = saved.SarvamKey
+		}
+		if saved.TesseractLang != "" {
+			tesseractLang = saved.TesseractLang
 		}
 	}
 	tesseractOk := extractor.DetectTesseract()
@@ -127,9 +138,11 @@ func main() {
 		providerKeys:  providerKeys,
 		defaultLLM:    defaultLLM,
 		embedProvider: embedProvider,
+		embedModel:    embedModel,
 		embedAPIKey:   embedAPIKey,
 		ocrProvider:   ocrProvider,
 		sarvamAPIKey:  sarvamAPIKey,
+		tesseractLang: tesseractLang,
 		tesseractOk:   tesseractOk,
 		indexCache:    newLRUCache(maxCacheSize),
 	}
@@ -147,6 +160,7 @@ func main() {
 	mux.HandleFunc("/api/upload", srv.handleUpload)
 	mux.HandleFunc("/api/ingest", srv.handleIngest)
 	mux.HandleFunc("/api/ingest/status", srv.handleIngestStatus)
+	mux.HandleFunc("/api/ingest/ws", srv.handleIngestWS)
 	mux.HandleFunc("/api/files", srv.handleFiles)
 	mux.HandleFunc("/api/file/view", srv.handleFileView)
 	mux.HandleFunc("/api/ingest/cancel", srv.handleCancelIngest)

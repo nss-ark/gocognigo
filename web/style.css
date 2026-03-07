@@ -3597,3 +3597,122 @@ body {
     border: none;
     background: var(--bg-secondary);
 }
+
+/* === Mobile Responsiveness === */
+
+@media (max-width: 900px) {
+    .app-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar-toggle {
+        display: flex;
+    }
+
+    .sidebar {
+        position: fixed;
+        left: calc(var(--sidebar-width) * -1);
+        width: var(--sidebar-width);
+        z-index: 1000;
+        box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .sidebar.open {
+        transform: translateX(var(--sidebar-width));
+    }
+
+    .sidebar-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(3px);
+        z-index: 999;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--transition);
+        display: none;
+    }
+
+    .sidebar-overlay.open {
+        display: block;
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .sidebar-overlay.hidden {
+        display: none !important;
+    }
+
+    /* Adjust main content padding */
+    .query-input-wrap {
+        margin: 0 1rem 1rem;
+    }
+
+    .controls-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.8rem;
+    }
+
+    .provider-toggle .provider-buttons,
+    .mode-selector {
+        width: 100%;
+        display: flex;
+    }
+
+    .provider-toggle {
+        width: 100%;
+        align-items: flex-start;
+    }
+
+    .provider-btn,
+    .mode-btn {
+        flex: 1;
+        justify-content: center;
+    }
+
+    .model-selector-wrap {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .model-select {
+        width: 100%;
+    }
+}
+
+@media (max-width: 600px) {
+    .header {
+        padding: 0.8rem 1rem;
+    }
+
+    .logo-text h1 {
+        font-size: 1.1rem;
+    }
+
+    .logo-subtitle {
+        display: none;
+    }
+
+    .stats-bar {
+        display: none;
+    }
+
+    .msg-content {
+        padding: 0.8rem 1rem;
+    }
+
+    .chat-actions {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .chat-action-btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .upload-zone {
+        padding: 2rem 1rem;
+    }
+}

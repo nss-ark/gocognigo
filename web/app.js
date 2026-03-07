@@ -136,9 +136,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('settingsDropdown').classList.add('hidden');
     });
     document.getElementById('settingsSaveBtn').addEventListener('click', saveSettings);
-    // OCR provider toggle to show/hide Sarvam key
+    // OCR provider toggle to show/hide Sarvam key and Tesseract lang
     document.getElementById('settingsOCR').addEventListener('change', (e) => {
         document.getElementById('sarvamKeyGroup').style.display = e.target.value === 'sarvam' ? '' : 'none';
+        document.getElementById('tesseractLangGroup').style.display = e.target.value === 'sarvam' ? 'none' : '';
     });
     // Close settings when clicking outside
     document.addEventListener('click', (e) => {

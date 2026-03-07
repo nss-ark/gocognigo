@@ -659,7 +659,12 @@ async function loadSettings() {
         const res = await fetch(`${API_BASE}/api/settings`);
         const s = await res.json();
         document.getElementById('settingsLLM').value = s.default_llm || 'anthropic';
-        document.getElementById('settingsEmbed').value = s.embed_provider || 'openai';
+        const embedEl = document.getElementById('settingsEmbed');
+        embedEl.value = s.embed_provider || 'openai';
+        embedEl.dataset.original = s.embed_provider || 'openai';
+        const embedModelEl = document.getElementById('settingsEmbedModel');
+        embedModelEl.value = s.embed_model || '';
+        embedModelEl.dataset.original = s.embed_model || '';
         document.getElementById('settingsOpenAIKey').value = '';
         document.getElementById('settingsOpenAIKey').placeholder = s.openai_key ? s.openai_key : 'sk-...';
         document.getElementById('settingsAnthropicKey').value = s.anthropic_key || '';
@@ -672,8 +677,10 @@ async function loadSettings() {
         // OCR settings
         document.getElementById('settingsOCR').value = s.ocr_provider || '';
         document.getElementById('sarvamKeyGroup').style.display = s.ocr_provider === 'sarvam' ? '' : 'none';
+        document.getElementById('tesseractLangGroup').style.display = s.ocr_provider === 'sarvam' ? 'none' : '';
         document.getElementById('settingsSarvamKey').value = '';
         document.getElementById('settingsSarvamKey').placeholder = s.sarvam_key ? s.sarvam_key : 'sarvam_...';
+        document.getElementById('settingsTesseractLang').value = s.tesseract_lang || 'eng';
         // Show tesseract availability
         const tsStatus = document.getElementById('tesseractStatus');
         if (s.tesseract_available) {
@@ -697,8 +704,16 @@ async function saveSettings() {
     const body = {
         default_llm: document.getElementById('settingsLLM').value,
         embed_provider: document.getElementById('settingsEmbed').value,
+        embed_model: document.getElementById('settingsEmbedModel').value.trim(),
         ocr_provider: document.getElementById('settingsOCR').value,
+        tesseract_lang: document.getElementById('settingsTesseractLang').value.trim(),
     };
+
+    const newEmbedProvider = body.embed_provider;
+    const oldEmbedProvider = document.getElementById('settingsEmbed').dataset.original || 'openai';
+    const newEmbedModel = body.embed_model;
+    const oldEmbedModel = document.getElementById('settingsEmbedModel').dataset.original || '';
+    const embedChanged = (oldEmbedProvider !== newEmbedProvider) || (oldEmbedModel !== newEmbedModel);
 
     // Only send keys if user typed a new one (not empty)
     const oaKey = document.getElementById('settingsOpenAIKey').value.trim();
@@ -721,6 +736,15 @@ async function saveSettings() {
             hint.style.color = '#10b981';
             // Refresh providers
             loadProviders();
+
+            document.getElementById('settingsEmbed').dataset.original = newEmbedProvider;
+            document.getElementById('settingsEmbedModel').dataset.original = newEmbedModel;
+
+            if (embedChanged) {
+                setTimeout(() => {
+                    alert("Embedding configuration changed!\\n\\nYou will need to Reset your projects and re-upload documents for semantic search to work correctly with the new embeddings.");
+                }, 100);
+            }
         } else {
             hint.textContent = '✗ Failed to save settings.';
             hint.style.color = '#ef4444';

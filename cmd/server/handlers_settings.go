@@ -25,12 +25,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]interface{}{
 			"default_llm":         s.defaultLLM,
 			"embed_provider":      s.embedProvider,
+			"embed_model":         s.embedModel,
 			"openai_key":          maskKey(s.providerKeys["openai"]),
 			"anthropic_key":       maskKey(s.providerKeys["anthropic"]),
 			"huggingface_key":     maskKey(s.providerKeys["huggingface"]),
 			"ocr_provider":        s.ocrProvider,
 			"sarvam_key":          maskKey(s.sarvamAPIKey),
 			"tesseract_available": s.tesseractOk,
+			"tesseract_lang":      s.tesseractLang,
 		}
 		s.mu.RUnlock()
 		jsonResp(w, resp)
@@ -42,8 +44,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			HuggingFaceKey string `json:"huggingface_key"`
 			DefaultLLM     string `json:"default_llm"`
 			EmbedProvider  string `json:"embed_provider"`
+			EmbedModel     string `json:"embed_model"`
 			OCRProvider    string `json:"ocr_provider"`
 			SarvamKey      string `json:"sarvam_key"`
+			TesseractLang  string `json:"tesseract_lang"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			jsonErr(w, "Invalid request", http.StatusBadRequest)
@@ -73,9 +77,18 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if req.EmbedModel != "" { // Can be empty to mean default
+			s.embedModel = req.EmbedModel
+		} else {
+			s.embedModel = "" // support clearing
+		}
+
 		s.ocrProvider = req.OCRProvider
 		if req.SarvamKey != "" && !strings.Contains(req.SarvamKey, "...") {
 			s.sarvamAPIKey = req.SarvamKey
+		}
+		if req.TesseractLang != "" {
+			s.tesseractLang = req.TesseractLang
 		}
 
 		saved := SavedSettings{
@@ -84,8 +97,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			HuggingFaceKey: s.providerKeys["huggingface"],
 			DefaultLLM:     s.defaultLLM,
 			EmbedProvider:  s.embedProvider,
+			EmbedModel:     s.embedModel,
 			OCRProvider:    s.ocrProvider,
 			SarvamKey:      s.sarvamAPIKey,
+			TesseractLang:  s.tesseractLang,
 		}
 		s.mu.Unlock()
 
@@ -143,7 +158,7 @@ func (s *Server) loadChatIndexes(ProjectID string) error {
 		return fmt.Errorf("no vectors file for project %s", ProjectID)
 	}
 
-	idx, err := indexer.NewIndex(s.embedProvider, s.embedAPIKey, "", bm25Dir)
+	idx, err := indexer.NewIndex(s.embedProvider, s.embedAPIKey, s.embedModel, bm25Dir)
 	if err != nil {
 		return fmt.Errorf("failed to open BM25 index: %w", err)
 	}

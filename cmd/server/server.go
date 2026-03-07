@@ -37,10 +37,12 @@ type Server struct {
 	providerKeys  map[string]string
 	defaultLLM    string
 	embedProvider string
+	embedModel    string
 	embedAPIKey   string
 	ocrProvider   string // "tesseract", "sarvam", or ""
 	sarvamAPIKey  string
-	tesseractOk   bool // true if tesseract CLI is on PATH
+	tesseractLang string // e.g. "eng", "fra", etc.
+	tesseractOk   bool   // true if tesseract CLI is on PATH
 }
 
 const maxCacheSize = 5
@@ -144,10 +146,23 @@ type FileResult struct {
 	Chunks int    `json:"chunks"`
 }
 
-func (s *IngestStatus) snapshot() IngestStatus {
+// IngestStatusSnapshot is a lock-free copy for JSON serialization.
+type IngestStatusSnapshot struct {
+	Phase          string       `json:"phase"`
+	FilesTotal     int          `json:"files_total"`
+	FilesDone      int          `json:"files_done"`
+	ChunksTotal    int          `json:"chunks_total"`
+	ChunksDone     int          `json:"chunks_done"`
+	Error          string       `json:"error,omitempty"`
+	FileResults    []FileResult `json:"file_results,omitempty"`
+	CanRetry       bool         `json:"can_retry,omitempty"`
+	RetryProjectID string       `json:"retry_project_id,omitempty"`
+}
+
+func (s *IngestStatus) snapshot() IngestStatusSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return IngestStatus{
+	return IngestStatusSnapshot{
 		Phase:          s.Phase,
 		FilesTotal:     s.FilesTotal,
 		FilesDone:      s.FilesDone,
@@ -218,8 +233,10 @@ type SavedSettings struct {
 	HuggingFaceKey string `json:"huggingface_key"`
 	DefaultLLM     string `json:"default_llm"`
 	EmbedProvider  string `json:"embed_provider"`
+	EmbedModel     string `json:"embed_model"`
 	OCRProvider    string `json:"ocr_provider"`
 	SarvamKey      string `json:"sarvam_key"`
+	TesseractLang  string `json:"tesseract_lang"`
 }
 
 func loadSavedSettings() *SavedSettings {

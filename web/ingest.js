@@ -23,20 +23,37 @@ async function startIngestion() {
     }
 }
 
+let ingestStatusWs = null;
+
 function startIngestPolling() {
-    if (ingestPollInterval) clearInterval(ingestPollInterval);
+    if (ingestPollInterval) {
+        clearInterval(ingestPollInterval);
+        ingestPollInterval = null;
+    }
+    if (ingestStatusWs) {
+        ingestStatusWs.close();
+        ingestStatusWs = null;
+    }
 
     updateIngestUI({ phase: 'processing', files_done: 0, files_total: 0, chunks_done: 0, chunks_total: 0 });
 
-    ingestPollInterval = setInterval(async () => {
+    let wsUrl;
+    if (API_BASE && API_BASE.startsWith('http')) {
+        wsUrl = API_BASE.replace(/^http/, 'ws') + '/api/ingest/ws';
+    } else {
+        wsUrl = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/api/ingest/ws';
+    }
+
+    ingestStatusWs = new WebSocket(wsUrl);
+
+    ingestStatusWs.onmessage = async (e) => {
         try {
-            const res = await fetch(`${API_BASE}/api/ingest/status`);
-            const status = await res.json();
+            const status = JSON.parse(e.data);
             updateIngestUI(status);
 
             if (status.phase === 'done') {
-                clearInterval(ingestPollInterval);
-                ingestPollInterval = null;
+                ingestStatusWs.close();
+                ingestStatusWs = null;
 
                 // Refresh projects
                 const projRes = await fetch(`${API_BASE}/api/chats`);
@@ -44,34 +61,40 @@ function startIngestPolling() {
                 renderSidebar();
                 loadStats();
 
-                // Show per-file results summary instead of auto-transitioning
                 showIngestResults(status);
             } else if (status.phase === 'error') {
-                clearInterval(ingestPollInterval);
-                ingestPollInterval = null;
+                ingestStatusWs.close();
+                ingestStatusWs = null;
 
                 if (status.can_retry) {
-                    // Show error with retry button instead of going back to upload
                     showRetryUI(status.error || 'Embedding failed');
                 } else {
                     alert('Processing failed: ' + (status.error || 'Unknown error'));
                     showPhase('upload');
                 }
             } else if (status.phase === 'cancelled') {
-                clearInterval(ingestPollInterval);
-                ingestPollInterval = null;
+                ingestStatusWs.close();
+                ingestStatusWs = null;
                 showPhase('upload');
             } else if (status.phase === 'idle') {
-                // Backend goroutine exited (e.g. crash/error) but project still says "processing"
-                clearInterval(ingestPollInterval);
-                ingestPollInterval = null;
+                ingestStatusWs.close();
+                ingestStatusWs = null;
                 alert('Processing stopped unexpectedly. Please try again.');
                 showPhase('upload');
             }
-        } catch (e) {
-            console.error('Poll error:', e);
+        } catch (err) {
+            console.error('WS message error:', err);
         }
-    }, 1500);
+    };
+
+    ingestStatusWs.onerror = (e) => {
+        console.error('WebSocket error:', e);
+    };
+
+    ingestStatusWs.onclose = () => {
+        ingestStatusWs = null;
+        // Optionally handle unexpected closure here
+    };
 }
 
 function updateIngestUI(status) {
