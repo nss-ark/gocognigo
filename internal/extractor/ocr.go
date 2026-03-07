@@ -39,7 +39,7 @@ var tesseractBin string
 func DetectTesseract() bool {
 	// 1. Check if tesseract is on PATH
 	if path, err := exec.LookPath("tesseract"); err == nil {
-		// Verify eng.traineddata exists in this installation's tessdata
+		// Check standard location first (Windows/custom installs)
 		tessdataDir := filepath.Join(filepath.Dir(path), "tessdata")
 		engPath := filepath.Join(tessdataDir, "eng.traineddata")
 		if _, statErr := os.Stat(engPath); statErr == nil {
@@ -47,7 +47,27 @@ func DetectTesseract() bool {
 			log.Printf("Tesseract found on PATH: %s", path)
 			return true
 		}
-		log.Printf("Tesseract on PATH at %s but eng.traineddata missing at %s, checking other locations...", path, tessdataDir)
+
+		// Check common Linux locations if standard fails
+		if runtime.GOOS == "linux" {
+			linuxTessdataDirs := []string{
+				"/usr/share/tesseract-ocr/5/tessdata",
+				"/usr/share/tesseract-ocr/4.00/tessdata",
+				"/usr/share/tessdata",
+			}
+			if envPrefix := os.Getenv("TESSDATA_PREFIX"); envPrefix != "" {
+				linuxTessdataDirs = append([]string{envPrefix}, linuxTessdataDirs...)
+			}
+			for _, d := range linuxTessdataDirs {
+				if _, statErr := os.Stat(filepath.Join(d, "eng.traineddata")); statErr == nil {
+					tesseractBin = path
+					log.Printf("Tesseract found on PATH: %s (tessdata: %s)", path, d)
+					return true
+				}
+			}
+		}
+
+		log.Printf("Tesseract on PATH at %s but eng.traineddata missing, checking other locations...", path)
 	}
 
 	// 2. On Windows, check common installation directories

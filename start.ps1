@@ -233,12 +233,26 @@ $tesseractBinDir = $null
 if ($sysTesseract) {
     Write-Host "  Tesseract: found at $sysTesseract" -ForegroundColor Green
     $tesseractBinDir = Split-Path -Parent $sysTesseract
+    # For system-installed Tesseract, TESSDATA_PREFIX is usually handled by its installer or not needed.
+    # We'll only set it for local installs to avoid interfering with system setups.
 } elseif (Test-Path $tesseractExe) {
     Write-Host "  Tesseract: found (cached in tools/Tesseract-OCR/)" -ForegroundColor Green
     $tesseractBinDir = $tesseractDir
+    # Set TESSDATA_PREFIX for current session for local install
+    $tessdataDir = Join-Path $tesseractDir "tessdata"
+    if (Test-Path $tessdataDir) {
+        $env:TESSDATA_PREFIX = $tessdataDir
+        Write-Host "  Set TESSDATA_PREFIX to $tessdataDir" -ForegroundColor Gray
+    }
 } elseif (Test-Path $tesseractExeOld) {
     Write-Host "  Tesseract: found (cached in tools/tesseract/)" -ForegroundColor Green
     $tesseractBinDir = $tesseractDirOld
+    # Set TESSDATA_PREFIX for current session for local install (old path)
+    $tessdataDir = Join-Path $tesseractDirOld "tessdata"
+    if (Test-Path $tessdataDir) {
+        $env:TESSDATA_PREFIX = $tessdataDir
+        Write-Host "  Set TESSDATA_PREFIX to $tessdataDir" -ForegroundColor Gray
+    }
 } else {
     Write-Host "  Tesseract: not found, attempting install..." -ForegroundColor Yellow
 

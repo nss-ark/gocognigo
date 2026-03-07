@@ -178,7 +178,10 @@ cp .env.example .env
 # Edit .env with your API keys
 
 # Run (auto-installs Go, Tesseract, Poppler if missing)
+# On Windows:
 .\start.ps1
+# On Linux/macOS:
+chmod +x start.sh && ./start.sh
 ```
 
 Or manually:
