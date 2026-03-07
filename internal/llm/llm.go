@@ -23,7 +23,6 @@ type Footnote struct {
 	ID       int    `json:"id"`
 	Document string `json:"document"`
 	Page     int    `json:"page"`
-	Quote    string `json:"quote,omitempty"`
 }
 
 // Answer represents a structured LLM response
@@ -124,8 +123,8 @@ Respond in this exact JSON format:
   "thinking": "Let me analyze the question step by step. First, I need to... [your reasoning process here]",
   "answer": "The revenue was $50B[1] with growth of 12%[2].",
   "footnotes": [
-    {"id": 1, "document": "doc1.pdf", "page": 3, "quote": "Total revenue for the quarter reached $50B"},
-    {"id": 2, "document": "doc2.pdf", "page": 12, "quote": "representing a year-over-year growth of 12%"}
+    {"id": 1, "document": "doc1.pdf", "page": 3},
+    {"id": 2, "document": "doc2.pdf", "page": 12}
   ],
   "confidence": 0.95,
   "confidence_reason": "Exact figures found in two source documents"
@@ -141,8 +140,7 @@ Thinking rules:
 
 Answer rules:
 - Place [N] markers inline where a specific fact comes from that source
-- Each footnote has an id (matching the marker), document name, page number, and EXACT quote of the text
-- The quote MUST be exact, word-for-word from the context to allow for text highlighting
+- Each footnote has an id (matching the marker), document name, and page number
 - confidence is 0.0 to 1.0 based on how well the context answers the question
 - confidence_reason is a brief explanation (1 sentence) of why the score is what it is
 - If the answer cannot be found in the context, set confidence = 0.0
@@ -675,7 +673,6 @@ func parseAnswer(rawText string, question string) (*Answer, error) {
 				ID       int         `json:"id"`
 				Document string      `json:"document"`
 				Page     interface{} `json:"page"`
-				Quote    string      `json:"quote"`
 			}
 			if err2 := json.Unmarshal(parsed.Footnotes, &rawFootnotes); err2 == nil {
 				for _, fn := range rawFootnotes {
@@ -687,7 +684,6 @@ func parseAnswer(rawText string, question string) (*Answer, error) {
 						ID:       fn.ID,
 						Document: fn.Document,
 						Page:     pageNum,
-						Quote:    fn.Quote,
 					})
 				}
 			}

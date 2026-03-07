@@ -57,7 +57,7 @@ function createDocViewerOverlay() {
     return overlay;
 }
 
-function openDocViewer(projectId, filename, page, quote) {
+function openDocViewer(projectId, filename, page) {
     if (!projectId || !filename) return;
 
     // Only support PDF files
@@ -74,12 +74,7 @@ function openDocViewer(projectId, filename, page, quote) {
 
     // Build the URL for the PDF
     const pageNum = page && page > 0 ? page : 1;
-    let hash = `#page=${pageNum}`;
-    if (quote && quote.trim() !== '') {
-        // Native browser PDF viewers (Chrome/Edge) support #search="text"
-        hash += `&search="${encodeURIComponent(quote.trim())}"`;
-    }
-    const pdfUrl = `${API_BASE}/api/file/view?project_id=${encodeURIComponent(projectId)}&name=${encodeURIComponent(filename)}${hash}`;
+    const pdfUrl = `${API_BASE}/api/file/view?project_id=${encodeURIComponent(projectId)}&name=${encodeURIComponent(filename)}#page=${pageNum}`;
 
     filenameEl.textContent = filename;
     pageBadge.textContent = page && page > 0 ? `Page ${pageNum}` : '';

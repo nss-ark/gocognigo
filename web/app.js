@@ -24,8 +24,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderBatchQuestions();
 
     // Sidebar toggle (mobile)
-    document.getElementById('sidebarToggle').addEventListener('click', () => {
-        document.getElementById('sidebar').classList.toggle('open');
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+
+    function closeSidebar() {
+        sidebar.classList.remove('open');
+        sidebarOverlay.classList.remove('open');
+    }
+
+    sidebarToggle.addEventListener('click', () => {
+        sidebar.classList.toggle('open');
+        sidebarOverlay.classList.toggle('open');
+    });
+
+    // Close sidebar when clicking overlay
+    sidebarOverlay.addEventListener('click', closeSidebar);
+
+    // Auto-close sidebar on mobile when selecting a project or conversation
+    sidebar.addEventListener('click', (e) => {
+        if (window.innerWidth <= 900) {
+            // Check if click was on a selectable item
+            const isSelectable = e.target.closest('.project-header') || e.target.closest('.conv-item');
+            // But don't close if they clicked an action button (rename/delete/export)
+            const isActionBtn = e.target.closest('button');
+
+            if (isSelectable && !isActionBtn) {
+                closeSidebar();
+            }
+        }
     });
 
     // New project
@@ -133,11 +160,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // Escape — close settings dropdown
+        // Escape — close settings dropdown or sidebar
         if (e.key === 'Escape') {
             const dd = document.getElementById('settingsDropdown');
             if (!dd.classList.contains('hidden')) {
                 dd.classList.add('hidden');
+                return;
+            }
+            if (sidebar.classList.contains('open')) {
+                closeSidebar();
                 return;
             }
         }
