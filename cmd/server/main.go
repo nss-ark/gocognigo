@@ -191,6 +191,9 @@ func main() {
 	mux.HandleFunc("/api/community/clone", srv.handleCloneProject)
 	mux.HandleFunc("/api/community/tags", srv.handleCommunityTags)
 
+	// Auth endpoints
+	mux.HandleFunc("/api/auth/config", srv.handleAuthConfig)
+
 	// Static files
 	mux.Handle("/", http.FileServer(http.Dir("web")))
 
@@ -201,7 +204,7 @@ func main() {
 
 	httpSrv := &http.Server{
 		Addr:    ":" + port,
-		Handler: corsMiddleware(mux),
+		Handler: corsMiddleware(srv.authMiddleware(mux)),
 	}
 
 	// Graceful shutdown: listen for SIGINT/SIGTERM
