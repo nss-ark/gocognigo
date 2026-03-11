@@ -50,7 +50,8 @@ function renderSidebar() {
         const isActive = proj.id === activeProjectId;
         const date = new Date(proj.created_at);
         const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        const meta = proj.status === 'ready' ? `${proj.file_count} files \u2022 ${proj.chunk_count} chunks` :
+        const publishedBadge = proj.published ? ' <span class="published-badge">Published</span>' : '';
+        const meta = proj.status === 'ready' ? `${proj.file_count} files \u2022 ${proj.chunk_count} chunks${publishedBadge}` :
             proj.status === 'processing' ? 'Processing...' :
                 `${proj.file_count || 0} files uploaded`;
 
@@ -100,6 +101,12 @@ function renderSidebar() {
                     <div class="chat-item-meta">${dateStr} \u2022 ${meta}</div>
                 </div>
                 <div class="project-actions">
+                    <button class="chat-item-settings" onclick="event.stopPropagation(); openProjectSettings('${proj.id}')" title="Project Settings">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"></path>
+                        </svg>
+                    </button>
                     <button class="chat-item-rename" onclick="event.stopPropagation(); startRenameProject('${proj.id}')" title="Rename">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>

@@ -224,13 +224,24 @@
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <span class="sidebar-title">Projects</span>
-                <button class="new-chat-btn" id="newChatBtn" title="New Project">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                    New Project
-                </button>
+                <div class="sidebar-header-actions">
+                    <button class="new-chat-btn community-hub-btn" id="communityHubBtn" onclick="openCommunityHub()" title="Community Hub">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <path d="M23 21v-2a4 4 0 00-3-3.87"></path>
+                            <path d="M16 3.13a4 4 0 010 7.75"></path>
+                        </svg>
+                        Hub
+                    </button>
+                    <button class="new-chat-btn" id="newChatBtn" title="New Project">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        New
+                    </button>
+                </div>
             </div>
             <div class="sidebar-list" id="chatList">
                 <!-- Chat sessions rendered by JS -->
@@ -599,10 +610,104 @@
         </main>
     </div>
 
+    <!-- Project Settings Modal -->
+    <div class="modal-overlay hidden" id="projectSettingsModal">
+        <div class="modal-container project-settings-modal">
+            <div class="modal-header">
+                <h3>Project Settings</h3>
+                <button class="modal-close" onclick="closeProjectSettings()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-group">
+                    <label class="settings-label">Project Name</label>
+                    <input type="text" id="projSettingsName" class="settings-input" placeholder="My Project">
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">Description</label>
+                    <textarea id="projSettingsDesc" class="settings-input settings-textarea" rows="3"
+                        placeholder="Describe what this project contains and how it can help others..."></textarea>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">Tags <span class="settings-hint-inline">(comma-separated)</span></label>
+                    <input type="text" id="projSettingsTags" class="settings-input"
+                        placeholder="privacy-law, gdpr, compliance">
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">Author</label>
+                    <input type="text" id="projSettingsAuthor" class="settings-input" placeholder="Your name or handle">
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">Custom System Prompt <span class="settings-hint-inline">(prepended to
+                            default prompt)</span></label>
+                    <textarea id="projSettingsSystemPrompt" class="settings-input settings-textarea" rows="5"
+                        placeholder="You are an expert in privacy law. When answering questions, always reference the specific regulation and article number..."></textarea>
+                </div>
+
+                <div class="settings-divider"></div>
+
+                <div class="publish-section">
+                    <div class="publish-info">
+                        <h4>Community Publishing</h4>
+                        <p class="settings-hint">Publishing makes this project visible to other users in the Community
+                            Hub. They can clone it and use it with their own API keys.</p>
+                    </div>
+                    <div class="publish-status" id="publishStatus"></div>
+                    <div class="publish-actions">
+                        <button class="process-btn publish-btn" id="publishBtn" onclick="togglePublish()">
+                            Publish to Community
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="chat-action-btn" onclick="closeProjectSettings()">Cancel</button>
+                <button class="process-btn" onclick="saveProjectSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Community Hub Modal -->
+    <div class="modal-overlay hidden" id="communityHubModal">
+        <div class="modal-container community-hub-modal">
+            <div class="modal-header">
+                <h3>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 00-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 010 7.75"></path>
+                    </svg>
+                    Community Hub
+                </h3>
+                <button class="modal-close" onclick="closeCommunityHub()">&times;</button>
+            </div>
+            <div class="community-search-bar">
+                <input type="text" id="communitySearch" class="settings-input" placeholder="Search projects..."
+                    oninput="debounceCommunitySearch()">
+                <div class="community-tags" id="communityTags">
+                    <!-- Tags rendered by JS -->
+                </div>
+            </div>
+            <div class="modal-body community-grid" id="communityGrid">
+                <!-- Community projects rendered by JS -->
+                <div class="community-empty">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                        opacity="0.4">
+                        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 00-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 010 7.75"></path>
+                    </svg>
+                    <p>No published projects yet. Be the first to share!</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="footer">
         <span>Built with Go • Hybrid RAG • Multi-Provider LLM</span>
-        <span class="footer-accent">GoCognigo <span class="footer-version">v0.1.2</span></span>
+        <span class="footer-accent">GoCognigo <span class="footer-version">v0.2.0</span></span>
     </footer>
 
     <!-- Module scripts (loaded in dependency order) -->
@@ -616,6 +721,7 @@
     <script src="search.js"></script>
     <script src="docviewer.js"></script>
     <script src="query.js"></script>
+    <script src="community.js"></script>
     <script src="app.js"></script>
 </body>
 

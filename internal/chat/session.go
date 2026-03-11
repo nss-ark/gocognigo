@@ -20,6 +20,14 @@ type Project struct {
 	FileCount  int       `json:"file_count"`
 	ChunkCount int       `json:"chunk_count"`
 	Status     string    `json:"status"` // "upload", "processing", "ready"
+
+	// Community fields
+	Description  string   `json:"description,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	SystemPrompt string   `json:"system_prompt,omitempty"`
+	Author       string   `json:"author,omitempty"`
+	Published    bool     `json:"published,omitempty"`
+	PublishedAt  *time.Time `json:"published_at,omitempty"`
 }
 
 // ==================== Conversation ====================
@@ -183,6 +191,80 @@ func (s *ProjectStore) Delete(id string) error {
 	_ = os.RemoveAll(projDir)
 
 	return s.save()
+}
+
+// ==================== Community ====================
+
+// ListPublished returns all projects that have been published.
+func (s *ProjectStore) ListPublished() []Project {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var published []Project
+	for _, p := range s.projects {
+		if p.Published {
+			published = append(published, p)
+		}
+	}
+	return published
+}
+
+// CloneProject creates a new project by copying the documents and settings
+// from a published source project. The new project gets its own ID and
+// conversations but shares the uploaded files and system prompt.
+func (s *ProjectStore) CloneProject(sourceID, newName, author string) (*Project, error) {
+	source, err := s.Get(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("source project not found: %w", err)
+	}
+	if !source.Published {
+		return nil, fmt.Errorf("source project is not published")
+	}
+
+	// Create the new project
+	newProj, err := s.Create(newName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Copy community metadata from source
+	newProj.Description = source.Description
+	newProj.Tags = source.Tags
+	newProj.SystemPrompt = source.SystemPrompt
+	if author != "" {
+		newProj.Author = author
+	}
+
+	// Copy uploaded files from source to new project
+	srcUploads := filepath.Join(s.dataDir, sourceID, "uploads")
+	dstUploads := filepath.Join(s.dataDir, newProj.ID, "uploads")
+
+	entries, err := os.ReadDir(srcUploads)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			srcFile := filepath.Join(srcUploads, entry.Name())
+			dstFile := filepath.Join(dstUploads, entry.Name())
+			data, err := os.ReadFile(srcFile)
+			if err != nil {
+				continue
+			}
+			_ = os.WriteFile(dstFile, data, 0644)
+		}
+	}
+
+	// Count copied files
+	if copied, err := os.ReadDir(dstUploads); err == nil {
+		newProj.FileCount = len(copied)
+	}
+
+	if err := s.Update(*newProj); err != nil {
+		return nil, err
+	}
+
+	return newProj, nil
 }
 
 // ==================== Conversation CRUD ====================

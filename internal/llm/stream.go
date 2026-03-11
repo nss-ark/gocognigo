@@ -36,18 +36,19 @@ type StreamProvider interface {
 	// StreamAnswer streams tokens to the provided channel. The channel is
 	// closed when streaming is complete. The final message on the channel
 	// will have Type="done" with the complete Answer.
-	StreamAnswer(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, tokens chan<- StreamToken)
+	StreamAnswer(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, tokens chan<- StreamToken, customSystemPrompt ...string)
 }
 
 // ==========================================
 // Anthropic Streaming
 // ==========================================
 
-func (p *AnthropicProvider) StreamAnswer(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, tokens chan<- StreamToken) {
+func (p *AnthropicProvider) StreamAnswer(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, tokens chan<- StreamToken, customSystemPrompt ...string) {
 	defer close(tokens)
 
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("Question: %s\n\nContext:\n%s", question, contextStr)
+	sysPrompt := buildSystemPrompt(customSystemPrompt...)
 
 	// Build messages with history
 	anthMessages := []map[string]string{}
@@ -59,7 +60,7 @@ func (p *AnthropicProvider) StreamAnswer(ctx context.Context, question string, r
 	reqMap := map[string]interface{}{
 		"model":      p.model,
 		"max_tokens": 4096,
-		"system":     baseSystemPrompt,
+		"system":     sysPrompt,
 		"messages":   anthMessages,
 		"stream":     true,
 	}
@@ -212,15 +213,16 @@ func (p *AnthropicProvider) StreamAnswer(ctx context.Context, question string, r
 // OpenAI Streaming
 // ==========================================
 
-func (p *OpenAIProvider) StreamAnswer(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, tokens chan<- StreamToken) {
+func (p *OpenAIProvider) StreamAnswer(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, tokens chan<- StreamToken, customSystemPrompt ...string) {
 	defer close(tokens)
 
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("**Question:** %s\n\n**Context:**\n\n%s", question, contextStr)
+	sysPrompt := buildSystemPrompt(customSystemPrompt...)
 
 	historyMsgs := buildHistoryMessages(history)
 	msgs := []openai.ChatCompletionMessage{
-		{Role: openai.ChatMessageRoleSystem, Content: baseSystemPrompt},
+		{Role: openai.ChatMessageRoleSystem, Content: sysPrompt},
 	}
 	msgs = append(msgs, historyMsgs...)
 	msgs = append(msgs, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: userPrompt})
@@ -331,14 +333,15 @@ func (p *OpenAIProvider) StreamAnswer(ctx context.Context, question string, resu
 // HuggingFace Streaming
 // ==========================================
 
-func (p *HuggingFaceProvider) StreamAnswer(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, tokens chan<- StreamToken) {
+func (p *HuggingFaceProvider) StreamAnswer(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, tokens chan<- StreamToken, customSystemPrompt ...string) {
 	defer close(tokens)
 
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("Question: %s\n\nContext:\n%s", question, contextStr)
+	sysPrompt := buildSystemPrompt(customSystemPrompt...)
 
 	messages := []map[string]string{
-		{"role": "system", "content": baseSystemPrompt},
+		{"role": "system", "content": sysPrompt},
 	}
 	for _, msg := range trimHistory(history) {
 		messages = append(messages, map[string]string{"role": msg.Role, "content": msg.Content})
