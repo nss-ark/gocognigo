@@ -94,6 +94,10 @@ function showLoginScreen() {
 function showApp() {
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('appContainer').classList.remove('hidden');
+    // In local mode, set a default user for the UI
+    if (!currentUser) {
+        currentUser = { displayName: 'Local User', email: null, photoURL: null };
+    }
     updateAuthUI();
 }
 
@@ -163,10 +167,15 @@ async function signInWithEmail() {
 }
 
 async function signOut() {
-    if (!firebaseAuth) return;
-    try {
-        await firebaseAuth.signOut();
-    } catch (e) {
-        console.error('Sign-out failed:', e);
+    if (firebaseAuth) {
+        try {
+            await firebaseAuth.signOut();
+        } catch (e) {
+            console.error('Sign-out failed:', e);
+        }
+    } else {
+        // In local mode, just clear current user and reload
+        currentUser = null;
+        location.reload();
     }
 }
