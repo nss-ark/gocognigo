@@ -39,7 +39,16 @@ type Answer struct {
 
 // Provider defines the interface for different LLM backends
 type Provider interface {
-	AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage) (*Answer, error)
+	AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, customSystemPrompt ...string) (*Answer, error)
+}
+
+// buildSystemPrompt combines the base system prompt with an optional custom
+// system prompt. The custom prompt is prepended as additional context/instructions.
+func buildSystemPrompt(customSystemPrompt ...string) string {
+	if len(customSystemPrompt) > 0 && customSystemPrompt[0] != "" {
+		return customSystemPrompt[0] + "\n\n---\n\n" + baseSystemPrompt
+	}
+	return baseSystemPrompt
 }
 
 // NewProvider creates the appropriate LLM provider based on config
@@ -197,9 +206,10 @@ type OpenAIProvider struct {
 	model  string
 }
 
-func (p *OpenAIProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage) (*Answer, error) {
+func (p *OpenAIProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, customSystemPrompt ...string) (*Answer, error) {
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("**Question:** %s\n\n**Context:**\n\n%s", question, contextStr)
+	sysPrompt := buildSystemPrompt(customSystemPrompt...)
 
 	// Build message list with conversation history
 	historyMsgs := buildHistoryMessages(history)
@@ -219,7 +229,7 @@ func (p *OpenAIProvider) AnswerQuestion(ctx context.Context, question string, re
 			// API interprets as an explicit value, so we must not set it at all.
 			// Also use MaxCompletionTokens instead of MaxTokens.
 			msgs := []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleSystem, Content: baseSystemPrompt},
+				{Role: openai.ChatMessageRoleSystem, Content: sysPrompt},
 			}
 			msgs = append(msgs, historyMsgs...)
 			msgs = append(msgs, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: userPrompt})
@@ -230,7 +240,7 @@ func (p *OpenAIProvider) AnswerQuestion(ctx context.Context, question string, re
 			})
 		} else {
 			msgs := []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleSystem, Content: baseSystemPrompt},
+				{Role: openai.ChatMessageRoleSystem, Content: sysPrompt},
 			}
 			msgs = append(msgs, historyMsgs...)
 			msgs = append(msgs, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: userPrompt})
@@ -295,13 +305,14 @@ type HuggingFaceProvider struct {
 	model  string
 }
 
-func (p *HuggingFaceProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage) (*Answer, error) {
+func (p *HuggingFaceProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, customSystemPrompt ...string) (*Answer, error) {
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("Question: %s\n\nContext:\n%s", question, contextStr)
+	sysPrompt := buildSystemPrompt(customSystemPrompt...)
 
 	// Build messages with history
 	messages := []map[string]string{
-		{"role": "system", "content": baseSystemPrompt},
+		{"role": "system", "content": sysPrompt},
 	}
 	for _, msg := range trimHistory(history) {
 		messages = append(messages, map[string]string{"role": msg.Role, "content": msg.Content})
@@ -390,9 +401,10 @@ type AnthropicProvider struct {
 	model  string
 }
 
-func (p *AnthropicProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage) (*Answer, error) {
+func (p *AnthropicProvider) AnswerQuestion(ctx context.Context, question string, results []retriever.Result, summaries []indexer.DocumentSummary, history []ChatMessage, customSystemPrompt ...string) (*Answer, error) {
 	contextStr := FormatContext(results, summaries)
 	userPrompt := fmt.Sprintf("Question: %s\n\nContext:\n%s", question, contextStr)
+	sysPrompt := buildSystemPrompt(customSystemPrompt...)
 
 	// Build messages with history
 	anthMessages := []map[string]string{}
@@ -405,7 +417,7 @@ func (p *AnthropicProvider) AnswerQuestion(ctx context.Context, question string,
 	reqMap := map[string]interface{}{
 		"model":      p.model,
 		"max_tokens": 4096,
-		"system":     baseSystemPrompt,
+		"system":     sysPrompt,
 		"messages":   anthMessages,
 	}
 

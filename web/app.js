@@ -203,6 +203,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Load projects and initialise
+    // Initialize auth (shows login or app), then load projects
+    await initAuth();
     loadProjects();
 });

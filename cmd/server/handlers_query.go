@@ -95,7 +95,13 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer, err := llmClient.AnswerQuestion(ctx, req.Question, results, rw.ret.DocSummaries, history)
+	// Look up project's custom system prompt
+	var customSysPrompt string
+	if proj, err := s.projects.Get(req.ProjectID); err == nil {
+		customSysPrompt = proj.SystemPrompt
+	}
+
+	answer, err := llmClient.AnswerQuestion(ctx, req.Question, results, rw.ret.DocSummaries, history, customSysPrompt)
 	if err != nil {
 		jsonErr(w, fmt.Sprintf("LLM error: %v", err), http.StatusInternalServerError)
 		return
@@ -227,9 +233,15 @@ func (s *Server) handleStreamQuery(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
+	// Look up project's custom system prompt
+	var customSysPrompt string
+	if proj, err := s.projects.Get(req.ProjectID); err == nil {
+		customSysPrompt = proj.SystemPrompt
+	}
+
 	// Start streaming
 	tokenCh := make(chan llm.StreamToken, 100)
-	go streamClient.StreamAnswer(ctx, req.Question, results, rw.ret.DocSummaries, history, tokenCh)
+	go streamClient.StreamAnswer(ctx, req.Question, results, rw.ret.DocSummaries, history, tokenCh, customSysPrompt)
 
 	var finalAnswer *llm.Answer
 
@@ -315,6 +327,12 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
 
+	// Look up project's custom system prompt
+	var customSysPrompt string
+	if proj, err := s.projects.Get(req.ProjectID); err == nil {
+		customSysPrompt = proj.SystemPrompt
+	}
+
 	answers := make([]*llm.Answer, len(req.Questions))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -331,7 +349,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 				mu.Unlock()
 				return
 			}
-			answer, err := llmClient.AnswerQuestion(ctx, question, results, rw.ret.DocSummaries, nil)
+			answer, err := llmClient.AnswerQuestion(ctx, question, results, rw.ret.DocSummaries, nil, customSysPrompt)
 			if err != nil {
 				mu.Lock()
 				errors = append(errors, fmt.Sprintf("Q%d LLM: %v", idx, err))

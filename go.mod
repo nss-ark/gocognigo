@@ -1,6 +1,8 @@
 module gocognigo
 
-go 1.23
+go 1.24.1
+
+toolchain go1.24.7
 
 require (
 	github.com/blevesearch/bleve/v2 v2.5.7

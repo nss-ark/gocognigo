@@ -184,6 +184,16 @@ func main() {
 	mux.HandleFunc("/api/conversations/messages", srv.handleMessages)
 	mux.HandleFunc("/api/conversations/rename", srv.handleRenameConversation)
 
+	// Community endpoints
+	mux.HandleFunc("/api/projects/meta", srv.handleUpdateProjectMeta)
+	mux.HandleFunc("/api/projects/publish", srv.handlePublishProject)
+	mux.HandleFunc("/api/community", srv.handleCommunityHub)
+	mux.HandleFunc("/api/community/clone", srv.handleCloneProject)
+	mux.HandleFunc("/api/community/tags", srv.handleCommunityTags)
+
+	// Auth endpoints
+	mux.HandleFunc("/api/auth/config", srv.handleAuthConfig)
+
 	// Static files
 	mux.Handle("/", http.FileServer(http.Dir("web")))
 
@@ -194,7 +204,7 @@ func main() {
 
 	httpSrv := &http.Server{
 		Addr:    ":" + port,
-		Handler: corsMiddleware(mux),
+		Handler: corsMiddleware(srv.authMiddleware(mux)),
 	}
 
 	// Graceful shutdown: listen for SIGINT/SIGTERM
