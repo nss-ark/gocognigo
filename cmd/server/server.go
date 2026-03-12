@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"gocognigo/internal/chat"
@@ -30,19 +31,13 @@ type Server struct {
 	// Keeps up to maxCacheSize entries; least-recently-used is evicted.
 	indexCache *lruCache
 
-	projects     *chat.ProjectStore
+	userProjects map[string]*chat.ProjectStore
+	userSettings map[string]*SavedSettings
+
 	ingestStatus *IngestStatus
 	ingestCancel context.CancelFunc // cancels the active ingestion goroutine
 
-	providerKeys  map[string]string
-	defaultLLM    string
-	embedProvider string
-	embedModel    string
-	embedAPIKey   string
-	ocrProvider   string // "tesseract", "sarvam", or ""
-	sarvamAPIKey  string
-	tesseractLang string // e.g. "eng", "fra", etc.
-	tesseractOk   bool   // true if tesseract CLI is on PATH
+	tesseractOk bool // true if tesseract CLI is on PATH
 }
 
 const maxCacheSize = 5
@@ -331,21 +326,25 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 // ========== Helpers ==========
 
-func (s *Server) getProvider(requestedProvider, requestedModel string) (llm.Provider, error) {
+func (s *Server) getProvider(settings *SavedSettings, requestedProvider, requestedModel string) (llm.Provider, error) {
 	provider := requestedProvider
 	if provider == "" {
-		provider = s.defaultLLM
+		provider = settings.DefaultLLM
 	}
-	apiKey := s.providerKeys[provider]
-	if apiKey == "" || apiKey == "your_openai_key_here" || apiKey == "your_anthropic_key_here" {
+	var apiKey string
+	switch provider {
+	case "openai":
+		apiKey = settings.OpenAIKey
+	case "anthropic":
+		apiKey = settings.AnthropicKey
+	case "huggingface":
+		apiKey = settings.HuggingFaceKey
+	}
+	
+	if apiKey == "" || strings.Contains(apiKey, "your_") {
 		return nil, fmt.Errorf("no API key configured for provider: %s", provider)
 	}
 	return llm.NewProvider(provider, apiKey, requestedModel)
-}
-
-// getOpenAIKey returns the configured OpenAI API key (used for query enhancement).
-func (s *Server) getOpenAIKey() string {
-	return s.providerKeys["openai"]
 }
 
 func jsonResp(w http.ResponseWriter, v interface{}) {
@@ -357,4 +356,104 @@ func jsonErr(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// getProjectStore returns a chat.ProjectStore tied to the current user
+func (s *Server) getProjectStore(r *http.Request) *chat.ProjectStore {
+	uid := getUserUID(r)
+	if uid == "" {
+		uid = "local_dev_user" // Fallback if auth is disabled
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.userProjects == nil {
+		s.userProjects = make(map[string]*chat.ProjectStore)
+	}
+
+	store, ok := s.userProjects[uid]
+	if !ok {
+		// Use a subfolder or distinct file for this user's projects
+		_ = os.MkdirAll("data/users", 0755)
+		storePath := fmt.Sprintf("data/users/%s_projects", uid)
+		sStore, err := chat.NewProjectStore(storePath)
+		if err != nil {
+			log.Printf("Error creating project store for user %s: %v", uid, err)
+			return nil
+		}
+		store = sStore
+		s.userProjects[uid] = store
+	}
+
+	return store
+}
+
+// getUserSettings returns the SavedSettings tied to the current user
+func (s *Server) getUserSettings(r *http.Request) *SavedSettings {
+	uid := getUserUID(r)
+	if uid == "" {
+		uid = "local_dev_user"
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.userSettings == nil {
+		s.userSettings = make(map[string]*SavedSettings)
+	}
+
+	settings, ok := s.userSettings[uid]
+	if !ok {
+		// Try to load from disk
+		_ = os.MkdirAll("data/users", 0755)
+		path := fmt.Sprintf("data/users/%s_settings.json", uid)
+		loaded, err := loadSettingsFromPath(path)
+		if err == nil {
+			settings = &loaded
+		} else {
+			// default settings
+			settings = &SavedSettings{
+				DefaultLLM:    "claude-3-haiku-20240307",
+				EmbedProvider: "openai",
+				OCRProvider:   "tesseract",
+			}
+		}
+		s.userSettings[uid] = settings
+	}
+	return settings
+}
+
+// saveUserSettings persists the settings to disk for a given user
+func (s *Server) saveUserSettings(r *http.Request, settings *SavedSettings) error {
+	uid := getUserUID(r)
+	if uid == "" {
+		uid = "local_dev_user"
+	}
+	
+	s.mu.Lock()
+	if s.userSettings == nil {
+		s.userSettings = make(map[string]*SavedSettings)
+	}
+	s.userSettings[uid] = settings
+	s.mu.Unlock()
+
+	_ = os.MkdirAll("data/users", 0755)
+	path := fmt.Sprintf("data/users/%s_settings.json", uid)
+	
+	b, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0644)
+}
+
+func loadSettingsFromPath(path string) (SavedSettings, error) {
+	var s SavedSettings
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return s, err
+	}
+	err = json.Unmarshal(b, &s)
+	return s, err
 }

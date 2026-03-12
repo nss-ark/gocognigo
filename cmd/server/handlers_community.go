@@ -29,7 +29,7 @@ func (s *Server) handleUpdateProjectMeta(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	proj, err := s.projects.Get(req.ProjectID)
+	proj, err := s.getProjectStore(r).Get(req.ProjectID)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusNotFound)
 		return
@@ -40,7 +40,7 @@ func (s *Server) handleUpdateProjectMeta(w http.ResponseWriter, r *http.Request)
 	proj.SystemPrompt = req.SystemPrompt
 	proj.Author = req.Author
 
-	if err := s.projects.Update(*proj); err != nil {
+	if err := s.getProjectStore(r).Update(*proj); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -64,7 +64,7 @@ func (s *Server) handlePublishProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proj, err := s.projects.Get(req.ProjectID)
+	proj, err := s.getProjectStore(r).Get(req.ProjectID)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusNotFound)
 		return
@@ -90,7 +90,7 @@ func (s *Server) handlePublishProject(w http.ResponseWriter, r *http.Request) {
 		proj.PublishedAt = nil
 	}
 
-	if err := s.projects.Update(*proj); err != nil {
+	if err := s.getProjectStore(r).Update(*proj); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -105,9 +105,8 @@ func (s *Server) handleCommunityHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	published := s.projects.ListPublished()
+	published := s.getProjectStore(r).ListPublished()
 	if published == nil {
-		published = []struct{} // Ensure empty array in JSON
 		jsonResp(w, []interface{}{})
 		return
 	}
@@ -187,7 +186,7 @@ func (s *Server) handleCloneProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newProj, err := s.projects.CloneProject(req.SourceID, req.Name, "")
+	newProj, err := s.getProjectStore(r).CloneProject(req.SourceID, req.Name, "")
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusBadRequest)
 		return
@@ -203,7 +202,7 @@ func (s *Server) handleCommunityTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	published := s.projects.ListPublished()
+	published := s.getProjectStore(r).ListPublished()
 	tagCounts := make(map[string]int)
 	for _, p := range published {
 		for _, t := range p.Tags {

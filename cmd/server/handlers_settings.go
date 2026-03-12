@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"gocognigo/internal/chat"
 	"gocognigo/internal/indexer"
 	"gocognigo/internal/retriever"
 )
@@ -21,18 +22,19 @@ import (
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		settings := s.getUserSettings(r)
 		s.mu.RLock()
 		resp := map[string]interface{}{
-			"default_llm":         s.defaultLLM,
-			"embed_provider":      s.embedProvider,
-			"embed_model":         s.embedModel,
-			"openai_key":          maskKey(s.providerKeys["openai"]),
-			"anthropic_key":       maskKey(s.providerKeys["anthropic"]),
-			"huggingface_key":     maskKey(s.providerKeys["huggingface"]),
-			"ocr_provider":        s.ocrProvider,
-			"sarvam_key":          maskKey(s.sarvamAPIKey),
+			"default_llm":         settings.DefaultLLM,
+			"embed_provider":      settings.EmbedProvider,
+			"embed_model":         settings.EmbedModel,
+			"openai_key":          maskKey(settings.OpenAIKey),
+			"anthropic_key":       maskKey(settings.AnthropicKey),
+			"huggingface_key":     maskKey(settings.HuggingFaceKey),
+			"ocr_provider":        settings.OCRProvider,
+			"sarvam_key":          maskKey(settings.SarvamKey),
 			"tesseract_available": s.tesseractOk,
-			"tesseract_lang":      s.tesseractLang,
+			"tesseract_lang":      settings.TesseractLang,
 		}
 		s.mu.RUnlock()
 		jsonResp(w, resp)
@@ -54,58 +56,44 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		s.mu.Lock()
+		settings := s.getUserSettings(r)
+
+		// Create a copy to update
+		newSettings := *settings
+
 		if req.OpenAIKey != "" && !strings.Contains(req.OpenAIKey, "...") {
-			s.providerKeys["openai"] = req.OpenAIKey
+			newSettings.OpenAIKey = req.OpenAIKey
 		}
 		if req.AnthropicKey != "" && !strings.Contains(req.AnthropicKey, "...") {
-			s.providerKeys["anthropic"] = req.AnthropicKey
+			newSettings.AnthropicKey = req.AnthropicKey
 		}
 		if req.HuggingFaceKey != "" && !strings.Contains(req.HuggingFaceKey, "...") {
-			s.providerKeys["huggingface"] = req.HuggingFaceKey
+			newSettings.HuggingFaceKey = req.HuggingFaceKey
 		}
 		if req.DefaultLLM != "" {
-			s.defaultLLM = req.DefaultLLM
+			newSettings.DefaultLLM = req.DefaultLLM
 		}
 		if req.EmbedProvider != "" {
-			s.embedProvider = req.EmbedProvider
-			switch req.EmbedProvider {
-			case "openai":
-				s.embedAPIKey = s.providerKeys["openai"]
-			case "huggingface":
-				s.embedAPIKey = s.providerKeys["huggingface"]
-			}
+			newSettings.EmbedProvider = req.EmbedProvider
 		}
-
 		if req.EmbedModel != "" { // Can be empty to mean default
-			s.embedModel = req.EmbedModel
+			newSettings.EmbedModel = req.EmbedModel
 		} else {
-			s.embedModel = "" // support clearing
+			newSettings.EmbedModel = "" // support clearing
 		}
 
-		s.ocrProvider = req.OCRProvider
+		newSettings.OCRProvider = req.OCRProvider
 		if req.SarvamKey != "" && !strings.Contains(req.SarvamKey, "...") {
-			s.sarvamAPIKey = req.SarvamKey
+			newSettings.SarvamKey = req.SarvamKey
 		}
 		if req.TesseractLang != "" {
-			s.tesseractLang = req.TesseractLang
+			newSettings.TesseractLang = req.TesseractLang
 		}
 
-		saved := SavedSettings{
-			OpenAIKey:      s.providerKeys["openai"],
-			AnthropicKey:   s.providerKeys["anthropic"],
-			HuggingFaceKey: s.providerKeys["huggingface"],
-			DefaultLLM:     s.defaultLLM,
-			EmbedProvider:  s.embedProvider,
-			EmbedModel:     s.embedModel,
-			OCRProvider:    s.ocrProvider,
-			SarvamKey:      s.sarvamAPIKey,
-			TesseractLang:  s.tesseractLang,
-		}
-		s.mu.Unlock()
-
-		if err := persistSettings(saved); err != nil {
+		if err := s.saveUserSettings(r, &newSettings); err != nil {
 			log.Printf("Failed to persist settings: %v", err)
+			jsonErr(w, "Failed to persist settings", http.StatusInternalServerError)
+			return
 		}
 
 		log.Printf("Settings updated: LLM=%s, Embed=%s", req.DefaultLLM, req.EmbedProvider)
@@ -150,15 +138,15 @@ func (s *Server) handleIndexStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // loadChatIndexes loads a project's pre-built indexes from disk.
-func (s *Server) loadChatIndexes(ProjectID string) error {
-	bm25Dir := s.projects.BM25Dir(ProjectID)
-	vectorsPath := s.projects.VectorsPath(ProjectID)
+func (s *Server) loadChatIndexes(store *chat.ProjectStore, settings *SavedSettings, ProjectID string) error {
+	bm25Dir := store.BM25Dir(ProjectID)
+	vectorsPath := store.VectorsPath(ProjectID)
 
 	if _, err := os.Stat(vectorsPath); os.IsNotExist(err) {
 		return fmt.Errorf("no vectors file for project %s", ProjectID)
 	}
 
-	idx, err := indexer.NewIndex(s.embedProvider, s.embedAPIKey, s.embedModel, bm25Dir)
+	idx, err := indexer.NewIndex(settings.EmbedProvider, settings.OpenAIKey, settings.EmbedModel, bm25Dir)
 	if err != nil {
 		return fmt.Errorf("failed to open BM25 index: %w", err)
 	}
@@ -203,24 +191,24 @@ func (s *Server) handleValidateKey(w http.ResponseWriter, r *http.Request) {
 		switch strings.ToLower(req.Provider) {
 		case "openai":
 			s.mu.RLock()
-			apiKey = s.embedAPIKey
+			apiKey = s.getUserSettings(r).OpenAIKey
 			s.mu.RUnlock()
 			if apiKey == "" {
 				s.mu.RLock()
-				apiKey = s.providerKeys["openai"]
+				apiKey = s.getUserSettings(r).OpenAIKey
 				s.mu.RUnlock()
 			}
 		case "anthropic":
 			s.mu.RLock()
-			apiKey = s.providerKeys["anthropic"]
+			apiKey = s.getUserSettings(r).AnthropicKey
 			s.mu.RUnlock()
 		case "huggingface":
 			s.mu.RLock()
-			apiKey = s.providerKeys["huggingface"]
+			apiKey = s.getUserSettings(r).HuggingFaceKey
 			s.mu.RUnlock()
 		case "sarvam":
 			s.mu.RLock()
-			apiKey = s.providerKeys["sarvam"]
+			apiKey = s.getUserSettings(r).SarvamKey
 			s.mu.RUnlock()
 		}
 		if apiKey == "" {

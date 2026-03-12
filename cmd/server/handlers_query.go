@@ -62,7 +62,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	llmClient, err := s.getProvider(req.Provider, req.Model)
+	llmClient, err := s.getProvider(s.getUserSettings(r), req.Provider, req.Model)
 	if err != nil {
 		jsonErr(w, fmt.Sprintf("Provider error: %v", err), http.StatusBadRequest)
 		return
@@ -74,7 +74,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	// Load conversation history for context
 	var history []llm.ChatMessage
 	if req.ConversationID != "" {
-		if msgs, err := s.projects.LoadMessages(req.ProjectID, req.ConversationID); err == nil {
+		if msgs, err := s.getProjectStore(r).LoadMessages(req.ProjectID, req.ConversationID); err == nil {
 			for _, m := range msgs {
 				history = append(history, llm.ChatMessage{Role: m.Role, Content: m.Content})
 			}
@@ -84,7 +84,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	// Enhance the query using history + document context
 	enhancedQuestion := req.Question
 	if len(history) > 0 {
-		if enhanced, err := llm.EnhanceQuery(ctx, s.getOpenAIKey(), req.Question, history, rw.ret.DocSummaries); err == nil && enhanced != "" {
+		if enhanced, err := llm.EnhanceQuery(ctx, s.getUserSettings(r).OpenAIKey, req.Question, history, rw.ret.DocSummaries); err == nil && enhanced != "" {
 			enhancedQuestion = enhanced
 		}
 	}
@@ -97,7 +97,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	// Look up project's custom system prompt
 	var customSysPrompt string
-	if proj, err := s.projects.Get(req.ProjectID); err == nil {
+	if proj, err := s.getProjectStore(r).Get(req.ProjectID); err == nil {
 		customSysPrompt = proj.SystemPrompt
 	}
 
@@ -133,8 +133,8 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 			Timestamp: time.Now(),
 		}
 		go func() {
-			_ = s.projects.SaveMessage(req.ProjectID, req.ConversationID, userMsg)
-			_ = s.projects.SaveMessage(req.ProjectID, req.ConversationID, assistantMsg)
+			_ = s.getProjectStore(r).SaveMessage(req.ProjectID, req.ConversationID, userMsg)
+			_ = s.getProjectStore(r).SaveMessage(req.ProjectID, req.ConversationID, assistantMsg)
 		}()
 	}
 
@@ -171,7 +171,7 @@ func (s *Server) handleStreamQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	llmClient, err := s.getProvider(req.Provider, req.Model)
+	llmClient, err := s.getProvider(s.getUserSettings(r), req.Provider, req.Model)
 	if err != nil {
 		jsonErr(w, fmt.Sprintf("Provider error: %v", err), http.StatusBadRequest)
 		return
@@ -190,7 +190,7 @@ func (s *Server) handleStreamQuery(w http.ResponseWriter, r *http.Request) {
 	// Load conversation history for context
 	var history []llm.ChatMessage
 	if req.ConversationID != "" {
-		if msgs, err := s.projects.LoadMessages(req.ProjectID, req.ConversationID); err == nil {
+		if msgs, err := s.getProjectStore(r).LoadMessages(req.ProjectID, req.ConversationID); err == nil {
 			for _, m := range msgs {
 				history = append(history, llm.ChatMessage{Role: m.Role, Content: m.Content})
 			}
@@ -200,7 +200,7 @@ func (s *Server) handleStreamQuery(w http.ResponseWriter, r *http.Request) {
 	// Enhance the query using history + document context
 	enhancedQuestion := req.Question
 	if len(history) > 0 {
-		if enhanced, err := llm.EnhanceQuery(ctx, s.getOpenAIKey(), req.Question, history, rw.ret.DocSummaries); err == nil && enhanced != "" {
+		if enhanced, err := llm.EnhanceQuery(ctx, s.getUserSettings(r).OpenAIKey, req.Question, history, rw.ret.DocSummaries); err == nil && enhanced != "" {
 			enhancedQuestion = enhanced
 		}
 	}
@@ -235,7 +235,7 @@ func (s *Server) handleStreamQuery(w http.ResponseWriter, r *http.Request) {
 
 	// Look up project's custom system prompt
 	var customSysPrompt string
-	if proj, err := s.projects.Get(req.ProjectID); err == nil {
+	if proj, err := s.getProjectStore(r).Get(req.ProjectID); err == nil {
 		customSysPrompt = proj.SystemPrompt
 	}
 
@@ -289,8 +289,8 @@ func (s *Server) handleStreamQuery(w http.ResponseWriter, r *http.Request) {
 			Timestamp: time.Now(),
 		}
 		go func() {
-			_ = s.projects.SaveMessage(req.ProjectID, req.ConversationID, userMsg)
-			_ = s.projects.SaveMessage(req.ProjectID, req.ConversationID, assistantMsg)
+			_ = s.getProjectStore(r).SaveMessage(req.ProjectID, req.ConversationID, userMsg)
+			_ = s.getProjectStore(r).SaveMessage(req.ProjectID, req.ConversationID, assistantMsg)
 		}()
 	}
 }
@@ -318,7 +318,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	llmClient, err := s.getProvider(req.Provider, req.Model)
+	llmClient, err := s.getProvider(s.getUserSettings(r), req.Provider, req.Model)
 	if err != nil {
 		jsonErr(w, fmt.Sprintf("Provider error: %v", err), http.StatusBadRequest)
 		return
@@ -329,7 +329,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 
 	// Look up project's custom system prompt
 	var customSysPrompt string
-	if proj, err := s.projects.Get(req.ProjectID); err == nil {
+	if proj, err := s.getProjectStore(r).Get(req.ProjectID); err == nil {
 		customSysPrompt = proj.SystemPrompt
 	}
 
@@ -403,10 +403,15 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var available []string
-	for name, key := range s.providerKeys {
-		if key != "" && key != "your_openai_key_here" && key != "your_anthropic_key_here" {
-			available = append(available, name)
-		}
+	settings := s.getUserSettings(r)
+	if settings.OpenAIKey != "" && settings.OpenAIKey != "your_openai_key_here" {
+		available = append(available, "openai")
+	}
+	if settings.AnthropicKey != "" && settings.AnthropicKey != "your_anthropic_key_here" {
+		available = append(available, "anthropic")
+	}
+	if settings.HuggingFaceKey != "" {
+		available = append(available, "huggingface")
 	}
 
 	resp := StatsResponse{
@@ -414,7 +419,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		Chunks:     chunks,
 		IndexReady: chunks > 0,
 		Providers:  available,
-		DefaultLLM: s.defaultLLM,
+		DefaultLLM: s.getUserSettings(r).DefaultLLM,
 	}
 
 	jsonResp(w, resp)
@@ -442,11 +447,16 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	settings := s.getUserSettings(r)
 	result := make(map[string]interface{})
-	for name, key := range s.providerKeys {
-		if key != "" && key != "your_openai_key_here" && key != "your_anthropic_key_here" {
-			result[name] = allModels[name]
-		}
+	if settings.OpenAIKey != "" && settings.OpenAIKey != "your_openai_key_here" {
+		result["openai"] = allModels["openai"]
+	}
+	if settings.AnthropicKey != "" && settings.AnthropicKey != "your_anthropic_key_here" {
+		result["anthropic"] = allModels["anthropic"]
+	}
+	if settings.HuggingFaceKey != "" {
+		result["huggingface"] = allModels["huggingface"]
 	}
 	jsonResp(w, result)
 }

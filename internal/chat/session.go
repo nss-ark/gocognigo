@@ -22,11 +22,11 @@ type Project struct {
 	Status     string    `json:"status"` // "upload", "processing", "ready"
 
 	// Community fields
-	Description  string   `json:"description,omitempty"`
-	Tags         []string `json:"tags,omitempty"`
-	SystemPrompt string   `json:"system_prompt,omitempty"`
-	Author       string   `json:"author,omitempty"`
-	Published    bool     `json:"published,omitempty"`
+	Description  string     `json:"description,omitempty"`
+	Tags         []string   `json:"tags,omitempty"`
+	SystemPrompt string     `json:"system_prompt,omitempty"`
+	Author       string     `json:"author,omitempty"`
+	Published    bool       `json:"published,omitempty"`
 	PublishedAt  *time.Time `json:"published_at,omitempty"`
 }
 
