@@ -2,9 +2,7 @@
 
 async function loadProjects() {
     try {
-        const res = await fetch(`${API_BASE}/api/chats`);
-        projects = await res.json();
-        if (!projects) projects = [];
+        await refreshProjects();
     } catch (e) {
         projects = [];
     }
@@ -31,6 +29,7 @@ async function createProject() {
         activeProjectId = proj.id;
         activeConversationId = null;
         conversations = [];
+        if (!Array.isArray(projects)) projects = [];
         projects.push(proj);
         renderSidebar();
         uploadedFiles = [];
