@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"gocognigo/internal/chat"
 )
 
 // ========== Community Endpoints ==========
@@ -105,7 +107,7 @@ func (s *Server) handleCommunityHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	published := s.getProjectStore(r).ListPublished()
+	published := s.getAllPublishedProjects()
 	if published == nil {
 		jsonResp(w, []interface{}{})
 		return
@@ -186,7 +188,17 @@ func (s *Server) handleCloneProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newProj, err := s.getProjectStore(r).CloneProject(req.SourceID, req.Name, "")
+	srcProj, srcStore := s.findPublishedProject(req.SourceID)
+	if srcProj == nil {
+		jsonErr(w, "source project not found or not published", http.StatusNotFound)
+		return
+	}
+
+	var newProj *chat.Project
+	var err error
+	userStore := s.getProjectStore(r)
+	srcUploadsDir := srcStore.UploadsDir(req.SourceID)
+	newProj, err = userStore.CloneProjectFromExternal(srcProj, srcUploadsDir, req.Name, "")
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusBadRequest)
 		return
@@ -202,7 +214,7 @@ func (s *Server) handleCommunityTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	published := s.getProjectStore(r).ListPublished()
+	published := s.getAllPublishedProjects()
 	tagCounts := make(map[string]int)
 	for _, p := range published {
 		for _, t := range p.Tags {

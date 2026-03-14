@@ -157,8 +157,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // Escape — close settings dropdown or sidebar
+        // Escape — close settings dropdown, feature request modal, or sidebar
         if (e.key === 'Escape') {
+            const frOverlay = document.getElementById('featureRequestOverlay');
+            if (frOverlay && !frOverlay.classList.contains('hidden')) {
+                closeFeatureRequest();
+                return;
+            }
             const dd = document.getElementById('settingsDropdown');
             if (!dd.classList.contains('hidden')) {
                 dd.classList.add('hidden');
@@ -199,7 +204,50 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
+    // Escape closes feature request modal too
+    // (handled inside keydown listener above via closeFeatureRequest)
+
     // Initialize auth — showApp() will call loadStats/loadProviders/loadProjects
     // once the token is confirmed (Firebase callback or local mode).
     initAuth();
 });
+
+// ===== Feature Request =====
+
+function openFeatureRequest() {
+    document.getElementById('featureRequestOverlay').classList.remove('hidden');
+    document.getElementById('featureRequestText').focus();
+}
+
+function closeFeatureRequest() {
+    document.getElementById('featureRequestOverlay').classList.add('hidden');
+    document.getElementById('featureRequestText').value = '';
+    document.getElementById('featureRequestOverlay').querySelector('.modal-submit-btn').disabled = false;
+    document.getElementById('featureRequestOverlay').querySelector('.modal-submit-btn').textContent = 'Submit Request';
+}
+
+async function submitFeatureRequest() {
+    const text = document.getElementById('featureRequestText').value.trim();
+    if (!text) {
+        alert('Please describe the feature you\'d like to request.');
+        return;
+    }
+    const btn = document.getElementById('featureRequestOverlay').querySelector('.modal-submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Submitting\u2026';
+
+    try {
+        const res = await fetch(`${API_BASE}/api/feedback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        if (!res.ok) throw new Error('Server error');
+        btn.textContent = '\u2713 Submitted!';
+        setTimeout(closeFeatureRequest, 1200);
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Submit Request';
+        alert('Failed to submit: ' + e.message);
+    }
+}
