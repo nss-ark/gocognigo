@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gocognigo/internal/chat"
 	"gocognigo/internal/extractor"
 	"gocognigo/internal/indexer"
 	"gocognigo/internal/llm"
@@ -47,7 +48,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proj, err := s.projects.Get(projectID)
+	proj, err := s.getProjectStore(r).Get(projectID)
 	if err != nil {
 		jsonErr(w, "Project not found", http.StatusNotFound)
 		return
@@ -63,7 +64,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploadsDir := s.projects.UploadsDir(projectID)
+	uploadsDir := s.getProjectStore(r).UploadsDir(projectID)
 	_ = os.MkdirAll(uploadsDir, 0755)
 
 	var saved []string
@@ -100,7 +101,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	proj.FileCount = fileCount
-	_ = s.projects.Update(*proj)
+	_ = s.getProjectStore(r).Update(*proj)
 
 	jsonResp(w, map[string]interface{}{
 		"uploaded": saved,
@@ -117,7 +118,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		uploadsDir := s.projects.UploadsDir(projectID)
+		uploadsDir := s.getProjectStore(r).UploadsDir(projectID)
 		entries, _ := os.ReadDir(uploadsDir)
 		var files []map[string]interface{}
 		for _, e := range entries {
@@ -149,9 +150,9 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Clear uploads and indexes for this project
-		uploadsDir := s.projects.UploadsDir(req.ProjectID)
-		bm25Dir := s.projects.BM25Dir(req.ProjectID)
-		vectorsPath := s.projects.VectorsPath(req.ProjectID)
+		uploadsDir := s.getProjectStore(r).UploadsDir(req.ProjectID)
+		bm25Dir := s.getProjectStore(r).BM25Dir(req.ProjectID)
+		vectorsPath := s.getProjectStore(r).VectorsPath(req.ProjectID)
 
 		s.mu.Lock()
 		if s.activeProjectID == req.ProjectID && s.activeIndex != nil {
@@ -167,12 +168,12 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		_ = os.RemoveAll(bm25Dir)
 		_ = os.Remove(vectorsPath)
 
-		sess, _ := s.projects.Get(req.ProjectID)
+		sess, _ := s.getProjectStore(r).Get(req.ProjectID)
 		if sess != nil {
 			sess.FileCount = 0
 			sess.ChunkCount = 0
 			sess.Status = "upload"
-			_ = s.projects.Update(*sess)
+			_ = s.getProjectStore(r).Update(*sess)
 		}
 
 		s.ingestStatus.reset()
@@ -205,7 +206,7 @@ func (s *Server) handleDeleteSingleFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	uploadsDir := s.projects.UploadsDir(req.ProjectID)
+	uploadsDir := s.getProjectStore(r).UploadsDir(req.ProjectID)
 	targetPath := filepath.Join(uploadsDir, clean)
 
 	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
@@ -235,7 +236,7 @@ func (s *Server) handleDeleteSingleFile(w http.ResponseWriter, r *http.Request) 
 
 		if chunksRemoved > 0 {
 			// Re-save vectors to disk
-			vectorsPath := s.projects.VectorsPath(req.ProjectID)
+			vectorsPath := s.getProjectStore(r).VectorsPath(req.ProjectID)
 			if err := s.activeIndex.SaveVectors(vectorsPath); err != nil {
 				log.Printf("Warning: failed to re-save vectors after document removal: %v", err)
 			}
@@ -249,7 +250,7 @@ func (s *Server) handleDeleteSingleFile(w http.ResponseWriter, r *http.Request) 
 	}
 	s.mu.Unlock()
 
-	sess, _ := s.projects.Get(req.ProjectID)
+	sess, _ := s.getProjectStore(r).Get(req.ProjectID)
 	if sess != nil {
 		sess.FileCount = fileCount
 		if chunksRemoved > 0 {
@@ -258,7 +259,7 @@ func (s *Server) handleDeleteSingleFile(w http.ResponseWriter, r *http.Request) 
 				sess.ChunkCount = 0
 			}
 		}
-		_ = s.projects.Update(*sess)
+		_ = s.getProjectStore(r).Update(*sess)
 	}
 
 	log.Printf("Deleted file %q from project %s: %d chunks removed, %d files remaining",
@@ -293,9 +294,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projectID := req.ProjectID
-	uploadsDir := s.projects.UploadsDir(projectID)
-	bm25Dir := s.projects.BM25Dir(projectID)
-	vectorsPath := s.projects.VectorsPath(projectID)
+	uploadsDir := s.getProjectStore(r).UploadsDir(projectID)
+	bm25Dir := s.getProjectStore(r).BM25Dir(projectID)
+	vectorsPath := s.getProjectStore(r).VectorsPath(projectID)
 
 	// Gather files
 	entries, _ := os.ReadDir(uploadsDir)
@@ -316,10 +317,10 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update session status
-	sess, _ := s.projects.Get(projectID)
+	sess, _ := s.getProjectStore(r).Get(projectID)
 	if sess != nil {
 		sess.Status = "processing"
-		_ = s.projects.Update(*sess)
+		_ = s.getProjectStore(r).Update(*sess)
 	}
 
 	// Reset ingest status
@@ -340,12 +341,14 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	// Run ingestion in background
-	go s.runIngestion(ctx, projectID, uploadsDir, bm25Dir, vectorsPath, uploadedFiles)
+	store := s.getProjectStore(r)
+	settings := s.getUserSettings(r)
+	go s.runIngestion(ctx, store, settings, projectID, uploadsDir, bm25Dir, vectorsPath, uploadedFiles)
 
 	jsonResp(w, map[string]string{"status": "started"})
 }
 
-func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Dir, vectorsPath string, files []string) {
+func (s *Server) runIngestion(ctx context.Context, store *chat.ProjectStore, settings *SavedSettings, ProjectID, uploadsDir, bm25Dir, vectorsPath string, files []string) {
 	// Clear cancel func when done
 	defer func() {
 		s.mu.Lock()
@@ -398,10 +401,10 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		s.ingestStatus.Error = ""
 		s.ingestStatus.mu.Unlock()
 
-		sess, _ := s.projects.Get(ProjectID)
+		sess, _ := store.Get(ProjectID)
 		if sess != nil {
 			sess.Status = "ready"
-			_ = s.projects.Update(*sess)
+			_ = store.Update(*sess)
 		}
 		return
 	}
@@ -423,7 +426,7 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		_ = os.RemoveAll(bm25Dir)
 
 		var err error
-		idx, err = indexer.NewIndex(s.embedProvider, s.embedAPIKey, s.embedModel, bm25Dir)
+		idx, err = indexer.NewIndex(settings.EmbedProvider, settings.OpenAIKey, settings.EmbedModel, bm25Dir)
 		if err != nil {
 			s.ingestStatus.mu.Lock()
 			s.ingestStatus.Phase = "error"
@@ -476,9 +479,9 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 
 			s.mu.RLock()
 			ocrCfg := &extractor.OCRConfig{
-				Provider:      s.ocrProvider,
-				SarvamKey:     s.sarvamAPIKey,
-				TesseractLang: s.tesseractLang,
+				Provider:      settings.OCRProvider,
+				SarvamKey:     settings.SarvamKey,
+				TesseractLang: settings.TesseractLang,
 				TesseractOk:   s.tesseractOk,
 			}
 			s.mu.RUnlock()
@@ -514,7 +517,7 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 	}()
 
 	s.mu.RLock()
-	openAIKey := s.providerKeys["openai"]
+	openAIKey := settings.OpenAIKey
 	s.mu.RUnlock()
 
 	var fileResults []FileResult
@@ -573,7 +576,7 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 		log.Printf("Chunked %s: %d pages → %d chunks", fileName, len(docChunks), numChunks)
 
 		// Persist chunks to disk so embedding can be retried if it fails
-		chunksDir := s.projects.ChunksDir(ProjectID)
+		chunksDir := store.ChunksDir(ProjectID)
 		_ = os.MkdirAll(chunksDir, 0755)
 		chunkPath := filepath.Join(chunksDir, fileName+".chunks.json")
 		if err := indexer.SaveChunks(chunkPath, fileChunks); err != nil {
@@ -687,17 +690,17 @@ func (s *Server) runIngestion(ctx context.Context, ProjectID, uploadsDir, bm25Di
 	s.indexCache.put(ProjectID, &cachedIndex{idx: idx, ret: ret})
 	s.mu.Unlock()
 
-	sess, _ := s.projects.Get(ProjectID)
+	sess, _ := store.Get(ProjectID)
 	if sess != nil {
 		sess.Status = "ready"
 		sess.ChunkCount = len(idx.Chunks)
-		_ = s.projects.Update(*sess)
+		_ = store.Update(*sess)
 	}
 
 	log.Printf("Ingestion complete for project %s: %d chunks", ProjectID, len(idx.Chunks))
 
 	// Clean up chunk files on success
-	chunksDir := s.projects.ChunksDir(ProjectID)
+	chunksDir := store.ChunksDir(ProjectID)
 	if err := os.RemoveAll(chunksDir); err != nil {
 		log.Printf("Warning: failed to clean up chunk files: %v", err)
 	}
@@ -761,10 +764,10 @@ func (s *Server) handleCancelIngest(w http.ResponseWriter, r *http.Request) {
 
 	// Reset session status back to upload
 	if req.ProjectID != "" {
-		sess, _ := s.projects.Get(req.ProjectID)
+		sess, _ := s.getProjectStore(r).Get(req.ProjectID)
 		if sess != nil && (sess.Status == "processing" || sess.Status == "upload") {
 			sess.Status = "upload"
-			_ = s.projects.Update(*sess)
+			_ = s.getProjectStore(r).Update(*sess)
 		}
 	}
 
@@ -801,8 +804,8 @@ func (s *Server) handleRetryIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projectID := req.ProjectID
-	chunksDir := s.projects.ChunksDir(projectID)
-	vectorsPath := s.projects.VectorsPath(projectID)
+	chunksDir := s.getProjectStore(r).ChunksDir(projectID)
+	vectorsPath := s.getProjectStore(r).VectorsPath(projectID)
 
 	// Load saved chunk files
 	entries, err := os.ReadDir(chunksDir)
@@ -881,10 +884,10 @@ func (s *Server) handleRetryIngest(w http.ResponseWriter, r *http.Request) {
 	s.ingestStatus.mu.Unlock()
 
 	// Update session status
-	sess, _ := s.projects.Get(projectID)
+	sess, _ := s.getProjectStore(r).Get(projectID)
 	if sess != nil {
 		sess.Status = "processing"
-		_ = s.projects.Update(*sess)
+		_ = s.getProjectStore(r).Update(*sess)
 	}
 
 	// Create cancellable context
@@ -894,26 +897,28 @@ func (s *Server) handleRetryIngest(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	// Run embedding in background
-	go s.runRetryEmbedding(ctx, projectID, vectorsPath, idx, unembed)
+	store := s.getProjectStore(r)
+	settings := s.getUserSettings(r)
+	go s.runRetryEmbedding(ctx, store, settings, projectID, vectorsPath, idx, unembed)
 
 	jsonResp(w, map[string]string{"status": "retrying"})
 }
 
 // runRetryEmbedding runs only the embedding step for a retry.
-func (s *Server) runRetryEmbedding(ctx context.Context, projectID, vectorsPath string, idx *indexer.Index, chunks []indexer.Chunk) {
+func (s *Server) runRetryEmbedding(ctx context.Context, store *chat.ProjectStore, settings *SavedSettings, projectID, vectorsPath string, idx *indexer.Index, chunks []indexer.Chunk) {
 	defer func() {
 		s.mu.Lock()
 		s.ingestCancel = nil
 		s.mu.Unlock()
 	}()
 
-	bm25Dir := s.projects.BM25Dir(projectID)
+	bm25Dir := store.BM25Dir(projectID)
 
 	// Create index if we don't have one
 	if idx == nil {
 		_ = os.RemoveAll(bm25Dir)
 		var err error
-		idx, err = indexer.NewIndex(s.embedProvider, s.embedAPIKey, s.embedModel, bm25Dir)
+		idx, err = indexer.NewIndex(settings.EmbedProvider, settings.OpenAIKey, settings.EmbedModel, bm25Dir)
 		if err != nil {
 			s.ingestStatus.mu.Lock()
 			s.ingestStatus.Phase = "error"
@@ -980,15 +985,15 @@ func (s *Server) runRetryEmbedding(ctx context.Context, projectID, vectorsPath s
 	s.indexCache.put(projectID, &cachedIndex{idx: idx, ret: ret})
 	s.mu.Unlock()
 
-	sess, _ := s.projects.Get(projectID)
+	sess, _ := store.Get(projectID)
 	if sess != nil {
 		sess.Status = "ready"
 		sess.ChunkCount = len(idx.Chunks)
-		_ = s.projects.Update(*sess)
+		_ = store.Update(*sess)
 	}
 
 	// Clean up chunk files
-	chunksDir := s.projects.ChunksDir(projectID)
+	chunksDir := store.ChunksDir(projectID)
 	_ = os.RemoveAll(chunksDir)
 
 	log.Printf("Retry embedding complete for project %s: %d chunks", projectID, len(idx.Chunks))
@@ -1023,7 +1028,7 @@ func (s *Server) handleFileView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploadsDir := s.projects.UploadsDir(projectID)
+	uploadsDir := s.getProjectStore(r).UploadsDir(projectID)
 	filePath := filepath.Join(uploadsDir, clean)
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {

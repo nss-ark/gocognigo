@@ -73,8 +73,7 @@ async function handleFileDrop(fileList) {
     // Refresh full file list from server and session data
     await loadUploadedFiles();
     try {
-        const chatsRes = await fetch(`${API_BASE}/api/chats`);
-        projects = await chatsRes.json();
+        await refreshProjects();
         renderSidebar();
     } catch (e) { /* ignore */ }
 }
@@ -193,8 +192,7 @@ async function removeFile(name) {
         renderIndexedFiles();
 
         // Refresh projects to update file count in sidebar
-        const projRes = await fetch(`${API_BASE}/api/chats`);
-        projects = await projRes.json();
+        await refreshProjects();
         renderSidebar();
     } catch (e) {
         console.error('Failed to remove file', e);

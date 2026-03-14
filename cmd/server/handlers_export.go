@@ -22,7 +22,7 @@ func (s *Server) handleExportConversation(w http.ResponseWriter, r *http.Request
 	}
 
 	// Load conversation metadata
-	conv, err := s.projects.GetConversation(projectID, convID)
+	conv, err := s.getProjectStore(r).GetConversation(projectID, convID)
 	if err != nil {
 		http.Error(w, "Conversation not found", http.StatusNotFound)
 		return
@@ -30,12 +30,12 @@ func (s *Server) handleExportConversation(w http.ResponseWriter, r *http.Request
 
 	// Load project name
 	projectName := projectID
-	if proj, err := s.projects.Get(projectID); err == nil {
+	if proj, err := s.getProjectStore(r).Get(projectID); err == nil {
 		projectName = proj.Name
 	}
 
 	// Load messages
-	msgs, err := s.projects.LoadMessages(projectID, convID)
+	msgs, err := s.getProjectStore(r).LoadMessages(projectID, convID)
 	if err != nil {
 		http.Error(w, "Failed to load messages", http.StatusInternalServerError)
 		return

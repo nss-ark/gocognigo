@@ -17,10 +17,6 @@ function toggleTheme() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    // Load stats first (sets currentProvider from server default_llm),
-    // then load provider models so dropdown matches the active provider.
-    await loadStats();
-    loadProviders();
     renderBatchQuestions();
 
     // Sidebar toggle (mobile)
@@ -203,7 +199,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Initialize auth (shows login or app), then load projects
-    await initAuth();
-    loadProjects();
+    // Initialize auth — showApp() will call loadStats/loadProviders/loadProjects
+    // once the token is confirmed (Firebase callback or local mode).
+    initAuth();
 });

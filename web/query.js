@@ -835,8 +835,7 @@ async function resetChat() {
         loadStats();
 
         // Refresh projects
-        const projRes = await fetch(`${API_BASE}/api/chats`);
-        projects = await projRes.json();
+        await refreshProjects();
         renderSidebar();
     } catch (e) {
         alert('Reset error: ' + e.message);

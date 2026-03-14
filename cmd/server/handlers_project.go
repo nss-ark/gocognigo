@@ -11,13 +11,13 @@ import (
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		jsonResp(w, s.projects.List())
+		jsonResp(w, s.getProjectStore(r).List())
 	case http.MethodPost:
 		var req struct {
 			Name string `json:"name"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		sess, err := s.projects.Create(req.Name)
+		sess, err := s.getProjectStore(r).Create(req.Name)
 		if err != nil {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -40,7 +40,7 @@ func (s *Server) handleActivateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := s.projects.Get(req.ProjectID)
+	sess, err := s.getProjectStore(r).Get(req.ProjectID)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusNotFound)
 		return
@@ -73,8 +73,10 @@ func (s *Server) handleActivateProject(w http.ResponseWriter, r *http.Request) {
 			s.indexLoading = true
 			s.mu.Unlock()
 			// Load in background
+			store := s.getProjectStore(r)
+			settings := s.getUserSettings(r)
 			go func(projectID string) {
-				if err := s.loadChatIndexes(projectID); err != nil {
+				if err := s.loadChatIndexes(store, settings, projectID); err != nil {
 					log.Printf("Warning: could not load indexes for project %s: %v", projectID, err)
 				}
 				s.mu.Lock()
@@ -85,7 +87,7 @@ func (s *Server) handleActivateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return project with its conversations
-	convs := s.projects.ListConversations(sess.ID)
+	convs := s.getProjectStore(r).ListConversations(sess.ID)
 	jsonResp(w, map[string]interface{}{
 		"project":       sess,
 		"conversations": convs,
@@ -123,7 +125,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	s.indexCache.delete(req.ProjectID)
 	s.mu.Unlock()
 
-	if err := s.projects.Delete(req.ProjectID); err != nil {
+	if err := s.getProjectStore(r).Delete(req.ProjectID); err != nil {
 		jsonErr(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -146,14 +148,14 @@ func (s *Server) handleRenameProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := s.projects.Get(req.ProjectID)
+	sess, err := s.getProjectStore(r).Get(req.ProjectID)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
 	sess.Name = req.Name
-	if err := s.projects.Update(*sess); err != nil {
+	if err := s.getProjectStore(r).Update(*sess); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

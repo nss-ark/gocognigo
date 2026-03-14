@@ -18,7 +18,7 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		convs := s.projects.ListConversations(projectID)
+		convs := s.getProjectStore(r).ListConversations(projectID)
 		if convs == nil {
 			convs = []chat.Conversation{}
 		}
@@ -37,7 +37,7 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		conv, err := s.projects.CreateConversation(req.ProjectID, req.Name)
+		conv, err := s.getProjectStore(r).CreateConversation(req.ProjectID, req.Name)
 		if err != nil {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -65,7 +65,7 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	_ = s.projects.DeleteConversation(req.ProjectID, req.ConversationID)
+	_ = s.getProjectStore(r).DeleteConversation(req.ProjectID, req.ConversationID)
 	jsonResp(w, map[string]string{"status": "ok"})
 }
 
@@ -84,7 +84,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgs, err := s.projects.LoadMessages(req.ProjectID, req.ConversationID)
+	msgs, err := s.getProjectStore(r).LoadMessages(req.ProjectID, req.ConversationID)
 	if err != nil {
 		msgs = []chat.Message{}
 	}
@@ -108,14 +108,14 @@ func (s *Server) handleRenameConversation(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	conv, err := s.projects.GetConversation(req.ProjectID, req.ConversationID)
+	conv, err := s.getProjectStore(r).GetConversation(req.ProjectID, req.ConversationID)
 	if err != nil {
 		jsonErr(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
 	conv.Name = req.Name
-	if err := s.projects.UpdateConversation(*conv); err != nil {
+	if err := s.getProjectStore(r).UpdateConversation(*conv); err != nil {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

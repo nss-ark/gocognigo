@@ -232,13 +232,13 @@ const userUIDKey contextKey = "userUID"
 
 // authMiddleware checks for a valid Firebase ID token on API requests.
 // If FIREBASE_PROJECT_ID is not set, auth is disabled (local dev mode).
-func (s *Server) authMiddleware(next http.Handler) http.Handler {
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	projectID := os.Getenv("FIREBASE_PROJECT_ID")
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth if not configured (local dev mode)
 		if projectID == "" {
-			next.ServeHTTP(w, r)
+			next(w, r)
 			return
 		}
 
@@ -249,7 +249,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			path == "/api/community" ||
 			path == "/api/community/tags" ||
 			!strings.HasPrefix(path, "/api/") {
-			next.ServeHTTP(w, r)
+			next(w, r)
 			return
 		}
 
@@ -270,8 +270,8 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		// Store user UID in request context
 		ctx := context.WithValue(r.Context(), userUIDKey, claims.Subject)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		next(w, r.WithContext(ctx))
+	}
 }
 
 // getUserUID extracts the user UID from the request context.

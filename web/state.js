@@ -25,3 +25,11 @@ let timerInterval = null;
 let ingestPollInterval = null;
 let activeQueryController = null;
 let loaderTextInterval = null;
+
+// Fetch projects from backend with type safety
+async function refreshProjects() {
+    const res = await fetch(`${API_BASE}/api/chats`);
+    if (!res.ok) { projects = []; return; }
+    const data = await res.json();
+    projects = Array.isArray(data) ? data : [];
+}

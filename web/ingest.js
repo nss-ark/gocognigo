@@ -56,8 +56,7 @@ function startIngestPolling() {
                 ingestStatusWs = null;
 
                 // Refresh projects
-                const projRes = await fetch(`${API_BASE}/api/chats`);
-                projects = await projRes.json();
+                await refreshProjects();
                 renderSidebar();
                 loadStats();
 

@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -20,129 +20,17 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	embedProvider := os.Getenv("EMBEDDING_PROVIDER")
-	embedModel := os.Getenv("EMBEDDING_MODEL")
-	embedAPIKey := os.Getenv("EMBEDDING_API_KEY")
-	if embedAPIKey == "" {
-		embedAPIKey = os.Getenv("OPENAI_API_KEY")
-	}
-
-	providerKeys := map[string]string{
-		"openai":      os.Getenv("OPENAI_API_KEY"),
-		"huggingface": os.Getenv("HUGGINGFACE_API_KEY"),
-		"anthropic":   os.Getenv("ANTHROPIC_API_KEY"),
-	}
-
-	defaultLLM := os.Getenv("LLM_PROVIDER")
-	if defaultLLM == "" {
-		defaultLLM = "anthropic"
-	}
-
-	// Override with saved settings if they exist
-	if saved := loadSavedSettings(); saved != nil {
-		log.Printf("Loading saved settings from %s", settingsFile)
-		if saved.OpenAIKey != "" {
-			providerKeys["openai"] = saved.OpenAIKey
-		}
-		if saved.AnthropicKey != "" {
-			providerKeys["anthropic"] = saved.AnthropicKey
-		}
-		if saved.HuggingFaceKey != "" {
-			providerKeys["huggingface"] = saved.HuggingFaceKey
-		}
-		if saved.DefaultLLM != "" {
-			defaultLLM = saved.DefaultLLM
-		}
-		if saved.EmbedModel != "" {
-			embedModel = saved.EmbedModel
-		}
-		if saved.EmbedProvider != "" {
-			embedProvider = saved.EmbedProvider
-			// Resolve embed API key from the chosen provider
-			switch saved.EmbedProvider {
-			case "openai":
-				embedAPIKey = providerKeys["openai"]
-			case "huggingface":
-				embedAPIKey = providerKeys["huggingface"]
-			}
-		}
-	}
-
-	// OCR configuration
-	ocrProvider := os.Getenv("OCR_PROVIDER") // "tesseract", "sarvam", or ""
-	sarvamAPIKey := os.Getenv("SARVAM_API_KEY")
-	tesseractLang := os.Getenv("TESSERACT_LANG")
-	if tesseractLang == "" {
-		tesseractLang = "eng"
-	}
-	if saved := loadSavedSettings(); saved != nil {
-		if saved.OCRProvider != "" {
-			ocrProvider = saved.OCRProvider
-		}
-		if saved.SarvamKey != "" {
-			sarvamAPIKey = saved.SarvamKey
-		}
-		if saved.TesseractLang != "" {
-			tesseractLang = saved.TesseractLang
-		}
-	}
 	tesseractOk := extractor.DetectTesseract()
-
-	// Smart OCR provider auto-detection when no explicit provider is set
-	// Prefer Tesseract (free, local) over Sarvam (paid, cloud)
-	if ocrProvider == "" {
-		if tesseractOk {
-			ocrProvider = "tesseract"
-			log.Printf("OCR: auto-selected Tesseract (detected on system)")
-		} else if sarvamAPIKey != "" {
-			ocrProvider = "sarvam"
-			log.Printf("OCR: auto-selected Sarvam (API key configured, Tesseract not found)")
-		}
-	}
-
-	// Log OCR capability summary
-	switch {
-	case ocrProvider == "sarvam" && sarvamAPIKey != "":
-		log.Printf("OCR ready: Sarvam Document Intelligence (primary), Tesseract=%v (fallback)", tesseractOk)
-	case ocrProvider == "tesseract" && tesseractOk:
-		hasPdftoppm := extractor.DetectPdftoppm()
-		if hasPdftoppm {
-			log.Printf("OCR ready: Tesseract + Poppler (primary), Sarvam=%v (fallback)", sarvamAPIKey != "")
-		} else {
-			log.Printf("OCR WARNING: Tesseract found but Poppler (pdftoppm) is missing — cannot convert PDFs to images")
-			log.Printf("  Install Poppler or switch to Sarvam OCR (set SARVAM_API_KEY in .env)")
-			if sarvamAPIKey != "" {
-				ocrProvider = "sarvam"
-				log.Printf("  Auto-switching to Sarvam since API key is available")
-			}
-		}
-	case ocrProvider == "tesseract" && !tesseractOk:
-		log.Printf("OCR WARNING: OCR_PROVIDER=tesseract but Tesseract not found")
-		if sarvamAPIKey != "" {
-			ocrProvider = "sarvam"
-			log.Printf("  Auto-switching to Sarvam since API key is available")
-		}
-	default:
-		log.Printf("OCR: no provider configured (scanned PDFs will not be processed)")
-		log.Printf("  Set SARVAM_API_KEY in .env for cloud OCR, or install Tesseract + Poppler for local OCR")
-	}
-
-	projects, err := chat.NewProjectStore("data/projects")
-	if err != nil {
-		log.Fatalf("Failed to init project store: %v", err)
+	hasPdftoppm := extractor.DetectPdftoppm()
+	
+	if tesseractOk && !hasPdftoppm {
+		log.Printf("OCR WARNING: Tesseract found but Poppler (pdftoppm) is missing — cannot convert PDFs to images")
 	}
 
 	srv := &Server{
-		projects:      projects,
+		userProjects:  make(map[string]*chat.ProjectStore),
+		userSettings:  make(map[string]*SavedSettings),
 		ingestStatus:  &IngestStatus{Phase: "idle"},
-		providerKeys:  providerKeys,
-		defaultLLM:    defaultLLM,
-		embedProvider: embedProvider,
-		embedModel:    embedModel,
-		embedAPIKey:   embedAPIKey,
-		ocrProvider:   ocrProvider,
-		sarvamAPIKey:  sarvamAPIKey,
-		tesseractLang: tesseractLang,
 		tesseractOk:   tesseractOk,
 		indexCache:    newLRUCache(maxCacheSize),
 	}
@@ -150,48 +38,48 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Existing API endpoints
-	mux.HandleFunc("/api/query", srv.handleQuery)
-	mux.HandleFunc("/api/query/stream", srv.handleStreamQuery)
-	mux.HandleFunc("/api/batch", srv.handleBatch)
-	mux.HandleFunc("/api/stats", srv.handleStats)
-	mux.HandleFunc("/api/providers", srv.handleProviders)
+	mux.HandleFunc("/api/query", srv.authMiddleware(srv.handleQuery))
+	mux.HandleFunc("/api/query/stream", srv.authMiddleware(srv.handleStreamQuery))
+	mux.HandleFunc("/api/batch", srv.authMiddleware(srv.handleBatch))
+	mux.HandleFunc("/api/stats", srv.authMiddleware(srv.handleStats))
+	mux.HandleFunc("/api/providers", srv.authMiddleware(srv.handleProviders))
 
 	// Upload & ingestion endpoints
-	mux.HandleFunc("/api/upload", srv.handleUpload)
-	mux.HandleFunc("/api/ingest", srv.handleIngest)
-	mux.HandleFunc("/api/ingest/status", srv.handleIngestStatus)
-	mux.HandleFunc("/api/ingest/ws", srv.handleIngestWS)
-	mux.HandleFunc("/api/files", srv.handleFiles)
-	mux.HandleFunc("/api/file/view", srv.handleFileView)
-	mux.HandleFunc("/api/ingest/cancel", srv.handleCancelIngest)
-	mux.HandleFunc("/api/ingest/retry", srv.handleRetryIngest)
-	mux.HandleFunc("/api/files/delete", srv.handleDeleteSingleFile)
-	mux.HandleFunc("/api/settings", srv.handleSettings)
-	mux.HandleFunc("/api/settings/validate", srv.handleValidateKey)
-	mux.HandleFunc("/api/search", srv.handleSearch)
-	mux.HandleFunc("/api/conversations/export", srv.handleExportConversation)
-	mux.HandleFunc("/api/index-status", srv.handleIndexStatus)
+	mux.HandleFunc("/api/upload", srv.authMiddleware(srv.handleUpload))
+	mux.HandleFunc("/api/ingest", srv.authMiddleware(srv.handleIngest))
+	mux.HandleFunc("/api/ingest/status", srv.authMiddleware(srv.handleIngestStatus))
+	mux.HandleFunc("/api/ingest/ws", srv.authMiddleware(srv.handleIngestWS))
+	mux.HandleFunc("/api/files", srv.authMiddleware(srv.handleFiles))
+	mux.HandleFunc("/api/file/view", srv.authMiddleware(srv.handleFileView))
+	mux.HandleFunc("/api/ingest/cancel", srv.authMiddleware(srv.handleCancelIngest))
+	mux.HandleFunc("/api/ingest/retry", srv.authMiddleware(srv.handleRetryIngest))
+	mux.HandleFunc("/api/files/delete", srv.authMiddleware(srv.handleDeleteSingleFile))
+	mux.HandleFunc("/api/settings", srv.authMiddleware(srv.handleSettings))
+	mux.HandleFunc("/api/settings/validate", srv.authMiddleware(srv.handleValidateKey))
+	mux.HandleFunc("/api/search", srv.authMiddleware(srv.handleSearch))
+	mux.HandleFunc("/api/conversations/export", srv.authMiddleware(srv.handleExportConversation))
+	mux.HandleFunc("/api/index-status", srv.authMiddleware(srv.handleIndexStatus))
 
 	// Project endpoints
-	mux.HandleFunc("/api/chats", srv.handleProjects)
-	mux.HandleFunc("/api/chats/activate", srv.handleActivateProject)
-	mux.HandleFunc("/api/chats/delete", srv.handleDeleteProject)
-	mux.HandleFunc("/api/chats/rename", srv.handleRenameProject)
+	mux.HandleFunc("/api/chats", srv.authMiddleware(srv.handleProjects))
+	mux.HandleFunc("/api/chats/activate", srv.authMiddleware(srv.handleActivateProject))
+	mux.HandleFunc("/api/chats/delete", srv.authMiddleware(srv.handleDeleteProject))
+	mux.HandleFunc("/api/chats/rename", srv.authMiddleware(srv.handleRenameProject))
 
 	// Conversation endpoints
-	mux.HandleFunc("/api/conversations", srv.handleConversations)
-	mux.HandleFunc("/api/conversations/delete", srv.handleDeleteConversation)
-	mux.HandleFunc("/api/conversations/messages", srv.handleMessages)
-	mux.HandleFunc("/api/conversations/rename", srv.handleRenameConversation)
+	mux.HandleFunc("/api/conversations", srv.authMiddleware(srv.handleConversations))
+	mux.HandleFunc("/api/conversations/delete", srv.authMiddleware(srv.handleDeleteConversation))
+	mux.HandleFunc("/api/conversations/messages", srv.authMiddleware(srv.handleMessages))
+	mux.HandleFunc("/api/conversations/rename", srv.authMiddleware(srv.handleRenameConversation))
 
 	// Community endpoints
-	mux.HandleFunc("/api/projects/meta", srv.handleUpdateProjectMeta)
-	mux.HandleFunc("/api/projects/publish", srv.handlePublishProject)
-	mux.HandleFunc("/api/community", srv.handleCommunityHub)
-	mux.HandleFunc("/api/community/clone", srv.handleCloneProject)
-	mux.HandleFunc("/api/community/tags", srv.handleCommunityTags)
+	mux.HandleFunc("/api/projects/meta", srv.authMiddleware(srv.handleUpdateProjectMeta))
+	mux.HandleFunc("/api/projects/publish", srv.authMiddleware(srv.handlePublishProject))
+	mux.HandleFunc("/api/community", srv.authMiddleware(srv.handleCommunityHub))
+	mux.HandleFunc("/api/community/clone", srv.authMiddleware(srv.handleCloneProject))
+	mux.HandleFunc("/api/community/tags", srv.authMiddleware(srv.handleCommunityTags))
 
-	// Auth endpoints
+	// Auth endpoints (public)
 	mux.HandleFunc("/api/auth/config", srv.handleAuthConfig)
 
 	// Static files
@@ -201,10 +89,9 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-
 	httpSrv := &http.Server{
 		Addr:    ":" + port,
-		Handler: corsMiddleware(srv.authMiddleware(mux)),
+		Handler: corsMiddleware(mux),
 	}
 
 	// Graceful shutdown: listen for SIGINT/SIGTERM
