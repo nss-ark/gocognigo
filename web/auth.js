@@ -99,6 +99,10 @@ function showApp() {
         currentUser = { displayName: 'Local User', email: null, photoURL: null };
     }
     updateAuthUI();
+    // Load app data now that auth is confirmed (token is set for Firebase, or local mode)
+    loadStats();
+    loadProviders();
+    loadProjects();
 }
 
 function updateAuthUI() {

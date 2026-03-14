@@ -35,6 +35,7 @@ function scrollThread() {
 // ===== Sidebar Rendering =====
 
 function renderSidebar() {
+    if (!Array.isArray(projects)) projects = [];
     const list = document.getElementById('chatList');
     if (projects.length === 0) {
         list.innerHTML = `<div class="sidebar-empty">
