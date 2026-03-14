@@ -5,6 +5,7 @@ let firebaseApp = null;
 let firebaseAuth = null;
 let currentUser = null;
 let authIdToken = null;
+let tokenRefreshInterval = null;
 
 // Override global fetch to auto-attach auth token
 const _originalFetch = window.fetch;
@@ -51,7 +52,8 @@ async function initAuth() {
                 currentUser = user;
                 authIdToken = await user.getIdToken();
                 // Refresh token every 50 minutes (tokens expire in 1 hour)
-                setInterval(async () => {
+                if (tokenRefreshInterval) clearInterval(tokenRefreshInterval);
+                tokenRefreshInterval = setInterval(async () => {
                     if (currentUser) {
                         authIdToken = await currentUser.getIdToken(true);
                     }

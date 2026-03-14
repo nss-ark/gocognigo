@@ -448,6 +448,40 @@ func (s *Server) saveUserSettings(r *http.Request, settings *SavedSettings) erro
 	return os.WriteFile(path, b, 0644)
 }
 
+// getAllPublishedProjects returns all published projects from every user's store.
+func (s *Server) getAllPublishedProjects() []chat.Project {
+	s.mu.RLock()
+	stores := make([]*chat.ProjectStore, 0, len(s.userProjects))
+	for _, store := range s.userProjects {
+		stores = append(stores, store)
+	}
+	s.mu.RUnlock()
+
+	var all []chat.Project
+	for _, store := range stores {
+		all = append(all, store.ListPublished()...)
+	}
+	return all
+}
+
+// findPublishedProject searches all user stores for a published project with the given ID.
+// Returns the project and its store if found.
+func (s *Server) findPublishedProject(projectID string) (*chat.Project, *chat.ProjectStore) {
+	s.mu.RLock()
+	stores := make([]*chat.ProjectStore, 0, len(s.userProjects))
+	for _, store := range s.userProjects {
+		stores = append(stores, store)
+	}
+	s.mu.RUnlock()
+
+	for _, store := range stores {
+		if p, err := store.Get(projectID); err == nil && p.Published {
+			return p, store
+		}
+	}
+	return nil, nil
+}
+
 func loadSettingsFromPath(path string) (SavedSettings, error) {
 	var s SavedSettings
 	b, err := os.ReadFile(path)

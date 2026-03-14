@@ -220,6 +220,19 @@ func (s *ProjectStore) CloneProject(sourceID, newName, author string) (*Project,
 	if !source.Published {
 		return nil, fmt.Errorf("source project is not published")
 	}
+	return s.cloneFrom(source, filepath.Join(s.dataDir, sourceID, "uploads"), newName, author)
+}
+
+// CloneProjectFromExternal clones a published project whose files live in a
+// different store's directory (cross-user community clone).
+func (s *ProjectStore) CloneProjectFromExternal(source *Project, srcUploadsDir, newName, author string) (*Project, error) {
+	if !source.Published {
+		return nil, fmt.Errorf("source project is not published")
+	}
+	return s.cloneFrom(source, srcUploadsDir, newName, author)
+}
+
+func (s *ProjectStore) cloneFrom(source *Project, srcUploadsDir, newName, author string) (*Project, error) {
 
 	// Create the new project
 	newProj, err := s.Create(newName)
@@ -236,16 +249,15 @@ func (s *ProjectStore) CloneProject(sourceID, newName, author string) (*Project,
 	}
 
 	// Copy uploaded files from source to new project
-	srcUploads := filepath.Join(s.dataDir, sourceID, "uploads")
 	dstUploads := filepath.Join(s.dataDir, newProj.ID, "uploads")
 
-	entries, err := os.ReadDir(srcUploads)
+	entries, err := os.ReadDir(srcUploadsDir)
 	if err == nil {
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
-			srcFile := filepath.Join(srcUploads, entry.Name())
+			srcFile := filepath.Join(srcUploadsDir, entry.Name())
 			dstFile := filepath.Join(dstUploads, entry.Name())
 			data, err := os.ReadFile(srcFile)
 			if err != nil {

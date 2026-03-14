@@ -229,6 +229,7 @@ func base64URLDecode(s string) ([]byte, error) {
 type contextKey string
 
 const userUIDKey contextKey = "userUID"
+const userEmailKey contextKey = "userEmail"
 
 // authMiddleware checks for a valid Firebase ID token on API requests.
 // If FIREBASE_PROJECT_ID is not set, auth is disabled (local dev mode).
@@ -268,8 +269,9 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Store user UID in request context
+		// Store user UID and email in request context
 		ctx := context.WithValue(r.Context(), userUIDKey, claims.Subject)
+		ctx = context.WithValue(ctx, userEmailKey, claims.Email)
 		next(w, r.WithContext(ctx))
 	}
 }
@@ -279,4 +281,11 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func getUserUID(r *http.Request) string {
 	uid, _ := r.Context().Value(userUIDKey).(string)
 	return uid
+}
+
+// getUserEmail extracts the user email from the request context.
+// Returns empty string in local mode.
+func getUserEmail(r *http.Request) string {
+	email, _ := r.Context().Value(userEmailKey).(string)
+	return email
 }

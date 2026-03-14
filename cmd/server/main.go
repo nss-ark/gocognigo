@@ -79,6 +79,9 @@ func main() {
 	mux.HandleFunc("/api/community/clone", srv.authMiddleware(srv.handleCloneProject))
 	mux.HandleFunc("/api/community/tags", srv.authMiddleware(srv.handleCommunityTags))
 
+	// Feedback / feature requests
+	mux.HandleFunc("/api/feedback", srv.authMiddleware(srv.handleFeedback))
+
 	// Auth endpoints (public)
 	mux.HandleFunc("/api/auth/config", srv.handleAuthConfig)
 

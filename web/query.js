@@ -169,9 +169,8 @@ async function submitQuery() {
                 if (!textEl) return;
                 const displayText = extractAnswerFromStream(streamState.rawText);
                 if (!displayText) return; // Nothing to show yet
-                let html = renderMarkdown(displayText);
-                html = html.replace(/\[(\d+)\]/g, (m, n) => `<span class="footnote-ref">${n}</span>`);
-                textEl.innerHTML = html;
+                // Show plain text during streaming — markdown applied only on finalize
+                textEl.innerHTML = escapeHtml(displayText).replace(/\n/g, '<br>') + '<span class="stream-cursor"></span>';
                 scrollThread();
             }, 150);
         };
