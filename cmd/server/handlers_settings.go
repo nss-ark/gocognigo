@@ -185,31 +185,20 @@ func (s *Server) handleValidateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If no key provided, use the stored key from server settings
+	// If no key provided, use the stored key from user settings.
+	// Note: getUserSettings manages its own locking — do NOT hold s.mu here.
 	apiKey := req.APIKey
 	if apiKey == "" {
+		settings := s.getUserSettings(r)
 		switch strings.ToLower(req.Provider) {
 		case "openai":
-			s.mu.RLock()
-			apiKey = s.getUserSettings(r).OpenAIKey
-			s.mu.RUnlock()
-			if apiKey == "" {
-				s.mu.RLock()
-				apiKey = s.getUserSettings(r).OpenAIKey
-				s.mu.RUnlock()
-			}
+			apiKey = settings.OpenAIKey
 		case "anthropic":
-			s.mu.RLock()
-			apiKey = s.getUserSettings(r).AnthropicKey
-			s.mu.RUnlock()
+			apiKey = settings.AnthropicKey
 		case "huggingface":
-			s.mu.RLock()
-			apiKey = s.getUserSettings(r).HuggingFaceKey
-			s.mu.RUnlock()
+			apiKey = settings.HuggingFaceKey
 		case "sarvam":
-			s.mu.RLock()
-			apiKey = s.getUserSettings(r).SarvamKey
-			s.mu.RUnlock()
+			apiKey = settings.SarvamKey
 		}
 		if apiKey == "" {
 			jsonResp(w, map[string]interface{}{"valid": false, "error": "No API key configured for " + req.Provider})

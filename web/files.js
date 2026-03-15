@@ -32,6 +32,9 @@ function uploadFileWithProgress(file) {
         xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
 
         xhr.open('POST', `${API_BASE}/api/upload`);
+        if (authIdToken) {
+            xhr.setRequestHeader('Authorization', 'Bearer ' + authIdToken);
+        }
         xhr.send(formData);
     });
 }

@@ -430,7 +430,7 @@ func (s *Server) saveUserSettings(r *http.Request, settings *SavedSettings) erro
 	if uid == "" {
 		uid = "local_dev_user"
 	}
-	
+
 	s.mu.Lock()
 	if s.userSettings == nil {
 		s.userSettings = make(map[string]*SavedSettings)
@@ -440,8 +440,28 @@ func (s *Server) saveUserSettings(r *http.Request, settings *SavedSettings) erro
 
 	_ = os.MkdirAll("data/users", 0755)
 	path := fmt.Sprintf("data/users/%s_settings.json", uid)
-	
-	b, err := json.MarshalIndent(settings, "", "  ")
+
+	// Encrypt API key fields before writing to disk
+	toSave := *settings
+	var encErr error
+	if toSave.OpenAIKey, encErr = crypto.Encrypt(settings.OpenAIKey); encErr != nil {
+		log.Printf("Warning: failed to encrypt OpenAI key: %v", encErr)
+		toSave.OpenAIKey = settings.OpenAIKey
+	}
+	if toSave.AnthropicKey, encErr = crypto.Encrypt(settings.AnthropicKey); encErr != nil {
+		log.Printf("Warning: failed to encrypt Anthropic key: %v", encErr)
+		toSave.AnthropicKey = settings.AnthropicKey
+	}
+	if toSave.HuggingFaceKey, encErr = crypto.Encrypt(settings.HuggingFaceKey); encErr != nil {
+		log.Printf("Warning: failed to encrypt HuggingFace key: %v", encErr)
+		toSave.HuggingFaceKey = settings.HuggingFaceKey
+	}
+	if toSave.SarvamKey, encErr = crypto.Encrypt(settings.SarvamKey); encErr != nil {
+		log.Printf("Warning: failed to encrypt Sarvam key: %v", encErr)
+		toSave.SarvamKey = settings.SarvamKey
+	}
+
+	b, err := json.MarshalIndent(toSave, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -488,6 +508,14 @@ func loadSettingsFromPath(path string) (SavedSettings, error) {
 	if err != nil {
 		return s, err
 	}
-	err = json.Unmarshal(b, &s)
-	return s, err
+	if err := json.Unmarshal(b, &s); err != nil {
+		return s, err
+	}
+
+	// Decrypt API key fields (backward-compatible: if decryption fails, use raw value)
+	s.OpenAIKey = decryptOrPassthrough(s.OpenAIKey)
+	s.AnthropicKey = decryptOrPassthrough(s.AnthropicKey)
+	s.HuggingFaceKey = decryptOrPassthrough(s.HuggingFaceKey)
+	s.SarvamKey = decryptOrPassthrough(s.SarvamKey)
+	return s, nil
 }
