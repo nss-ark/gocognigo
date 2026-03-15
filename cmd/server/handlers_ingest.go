@@ -316,6 +316,24 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate that an embedding API key is configured before starting
+	settings := s.getUserSettings(r)
+	embedProvider := settings.EmbedProvider
+	if embedProvider == "" {
+		embedProvider = "openai"
+	}
+	var embedKey string
+	switch embedProvider {
+	case "openai":
+		embedKey = settings.OpenAIKey
+	case "huggingface":
+		embedKey = settings.HuggingFaceKey
+	}
+	if embedKey == "" {
+		jsonErr(w, "No API key configured for embedding provider \""+embedProvider+"\". Please open Settings (⚙ icon) and add your API key before processing.", http.StatusBadRequest)
+		return
+	}
+
 	// Update session status
 	sess, _ := s.getProjectStore(r).Get(projectID)
 	if sess != nil {
@@ -342,7 +360,6 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	// Run ingestion in background
 	store := s.getProjectStore(r)
-	settings := s.getUserSettings(r)
 	go s.runIngestion(ctx, store, settings, projectID, uploadsDir, bm25Dir, vectorsPath, uploadedFiles)
 
 	jsonResp(w, map[string]string{"status": "started"})
@@ -772,7 +789,7 @@ func (s *Server) handleCancelIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.ingestStatus.mu.Lock()
-	s.ingestStatus.Phase = "idle"
+	s.ingestStatus.Phase = "cancelled"
 	s.ingestStatus.Error = ""
 	s.ingestStatus.CanRetry = false
 	s.ingestStatus.RetryProjectID = ""

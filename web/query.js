@@ -251,7 +251,11 @@ async function submitQuery() {
 
         const errDiv = document.createElement('div');
         errDiv.className = 'msg-answer';
-        errDiv.innerHTML = `<div class="msg-answer-header"><span class="msg-answer-label" style="color:var(--danger)">Error</span></div><div class="msg-answer-text" style="color:var(--danger)">${escapeHtml(e.message)}</div>`;
+        const isNoKeyError = e.message && e.message.toLowerCase().includes('no api key configured');
+        const errHtml = isNoKeyError
+            ? `<strong>API key not configured.</strong> Please add your API key in <a href="#" onclick="document.getElementById('settingsDropdown')?.classList.remove('hidden');loadSettings();return false;" style="color:var(--accent)">Settings</a> before querying.`
+            : escapeHtml(e.message);
+        errDiv.innerHTML = `<div class="msg-answer-header"><span class="msg-answer-label" style="color:var(--danger)">Error</span></div><div class="msg-answer-text" style="color:var(--danger)">${errHtml}</div>`;
         thread.appendChild(errDiv);
         scrollThread();
     }
@@ -733,8 +737,9 @@ async function saveSettings() {
         if (res.ok) {
             hint.textContent = '✓ Settings saved! Changes take effect immediately.';
             hint.style.color = '#10b981';
-            // Refresh providers
+            // Refresh providers and re-check API key banner
             loadProviders();
+            checkApiKeySetup();
 
             document.getElementById('settingsEmbed').dataset.original = newEmbedProvider;
             document.getElementById('settingsEmbedModel').dataset.original = newEmbedModel;
@@ -1002,4 +1007,90 @@ function clearBatchQuestions() {
         saveBatchQuestions();
         renderBatchQuestions();
     }
+}
+
+// ===== API Key Setup Wizard =====
+
+async function checkApiKeySetup() {
+    try {
+        const res = await fetch(`${API_BASE}/api/settings`);
+        if (!res.ok) return;
+        const s = await res.json();
+        const hasLLMKey = !!(s.openai_key || s.anthropic_key || s.huggingface_key);
+        const hasEmbedKey = s.embed_provider === 'huggingface' ? !!s.huggingface_key : !!s.openai_key;
+        const banner = document.getElementById('apiKeyBanner');
+        if (!banner) return;
+        if (!hasLLMKey || !hasEmbedKey) {
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+        }
+    } catch (e) {
+        // ignore — don't block app startup
+    }
+}
+
+function openSetupWizard() {
+    document.getElementById('setupWizardOverlay').classList.remove('hidden');
+}
+
+function closeSetupWizard() {
+    document.getElementById('setupWizardOverlay').classList.add('hidden');
+    // Re-check after closing in case keys were saved
+    checkApiKeySetup();
+    loadProviders();
+}
+
+async function wizardSaveKey(provider, inputId, btn) {
+    const input = document.getElementById(inputId);
+    const key = input.value.trim();
+    if (!key) return;
+
+    const statusEl = document.getElementById('wizard' + provider.charAt(0).toUpperCase() + provider.slice(1).replace('face','Face') + 'Status');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+        // Save the key
+        const body = {};
+        if (provider === 'openai') body.openai_key = key;
+        else if (provider === 'anthropic') body.anthropic_key = key;
+        else if (provider === 'huggingface') body.huggingface_key = key;
+
+        const saveRes = await fetch(`${API_BASE}/api/settings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!saveRes.ok) throw new Error('Save failed');
+
+        // Validate the saved key
+        const valRes = await fetch(`${API_BASE}/api/settings/validate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider })
+        });
+        const val = await valRes.json();
+        if (statusEl) {
+            if (val.valid) {
+                statusEl.textContent = '✓ Key saved and validated';
+                statusEl.className = 'setup-key-status ok';
+                input.value = '';
+                input.placeholder = '••••••••••••' + key.slice(-4);
+            } else {
+                statusEl.textContent = '⚠ Saved, but validation failed: ' + (val.error || 'check your key');
+                statusEl.className = 'setup-key-status err';
+            }
+        }
+        // Immediately re-check if banner should be hidden
+        checkApiKeySetup();
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = '✗ Error: ' + e.message;
+            statusEl.className = 'setup-key-status err';
+        }
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Save';
 }

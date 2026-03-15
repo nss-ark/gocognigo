@@ -12,7 +12,15 @@ async function startIngestion() {
 
         if (!res.ok) {
             const err = await res.json();
-            alert('Failed to start processing: ' + (err.error || 'Unknown error'));
+            const msg = err.error || 'Unknown error';
+            // Show setup wizard if this is an API key error
+            if (msg.includes('API key') || msg.includes('api key')) {
+                const banner = document.getElementById('apiKeyBanner');
+                if (banner) banner.classList.remove('hidden');
+                openSetupWizard();
+            } else {
+                alert('Failed to start processing: ' + msg);
+            }
             return;
         }
 
@@ -44,6 +52,9 @@ function startIngestPolling() {
         wsUrl = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/api/ingest/ws';
     }
 
+    if (authIdToken) {
+        wsUrl += '?token=' + encodeURIComponent(authIdToken);
+    }
     ingestStatusWs = new WebSocket(wsUrl);
 
     ingestStatusWs.onmessage = async (e) => {
@@ -155,29 +166,28 @@ async function cancelIngestion() {
     btn.disabled = true;
     btn.textContent = 'Cancelling...';
 
+    // Always close WebSocket immediately so we don't receive stale status updates
+    if (ingestStatusWs) {
+        ingestStatusWs.close();
+        ingestStatusWs = null;
+    }
+    if (ingestPollInterval) {
+        clearInterval(ingestPollInterval);
+        ingestPollInterval = null;
+    }
+
     try {
-        const res = await fetch(`${API_BASE}/api/ingest/cancel`, {
+        await fetch(`${API_BASE}/api/ingest/cancel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ project_id: activeProjectId })
         });
-        if (!res.ok) {
-            // No ingestion running — force return to upload anyway
-            if (ingestPollInterval) {
-                clearInterval(ingestPollInterval);
-                ingestPollInterval = null;
-            }
-            showPhase('upload');
-        }
     } catch (e) {
         console.error('Cancel error:', e);
-        // Force return to upload on network error too
-        if (ingestPollInterval) {
-            clearInterval(ingestPollInterval);
-            ingestPollInterval = null;
-        }
-        showPhase('upload');
     }
+
+    // Always navigate back to upload phase regardless of server response
+    showPhase('upload');
 
     btn.disabled = false;
     btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg> Cancel Processing`;

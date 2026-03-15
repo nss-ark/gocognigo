@@ -24,9 +24,14 @@
 
     <!-- Auth Screen (shown when not logged in) -->
     <div class="auth-screen hidden" id="authScreen">
+        <div class="auth-ambient">
+            <div class="auth-orb auth-orb-1"></div>
+            <div class="auth-orb auth-orb-2"></div>
+            <div class="auth-orb auth-orb-3"></div>
+        </div>
         <div class="auth-card">
             <div class="auth-logo">
-                <svg width="48" height="48" viewBox="0 0 32 32" fill="none">
+                <svg width="56" height="56" viewBox="0 0 32 32" fill="none">
                     <defs>
                         <linearGradient id="authLogoGrad" x1="0" y1="0" x2="32" y2="32">
                             <stop offset="0%" stop-color="#a855f7" />
@@ -39,20 +44,36 @@
                 <h2>GoCognigo</h2>
                 <p class="auth-subtitle">Document Intelligence Engine</p>
             </div>
-            <button class="auth-google-btn" onclick="signInWithGoogle()">
+            <button class="auth-google-btn" id="googleSignInBtn" onclick="signInWithGoogle()">
                 <svg width="18" height="18" viewBox="0 0 48 48">
                     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
                     <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
                     <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
                     <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
                 </svg>
-                Continue with Google
+                <span>Continue with Google</span>
+                <div class="auth-btn-spinner hidden"></div>
             </button>
             <div class="auth-divider"><span>or</span></div>
             <div class="auth-email-form">
-                <input type="email" id="authEmail" class="auth-input" placeholder="Email address" autocomplete="email">
-                <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="current-password">
-                <button class="auth-email-btn" onclick="signInWithEmail()">Sign In / Sign Up</button>
+                <div class="auth-input-wrap">
+                    <svg class="auth-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                        <path d="M22 4l-10 8L2 4"></path>
+                    </svg>
+                    <input type="email" id="authEmail" class="auth-input" placeholder="Email address" autocomplete="email">
+                </div>
+                <div class="auth-input-wrap">
+                    <svg class="auth-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                    <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="current-password">
+                </div>
+                <button class="auth-email-btn" id="emailSignInBtn" onclick="signInWithEmail()">
+                    <span>Sign In / Sign Up</span>
+                    <div class="auth-btn-spinner hidden"></div>
+                </button>
             </div>
         </div>
     </div>
@@ -350,6 +371,23 @@
                         Upload Documents
                     </h2>
                     <p class="phase-desc">Drag & drop PDF or DOCX files to begin</p>
+                </div>
+
+                <!-- API Key Setup Banner (shown when no keys configured) -->
+                <div class="api-key-banner hidden" id="apiKeyBanner">
+                    <div class="api-key-banner-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                    </div>
+                    <div class="api-key-banner-body">
+                        <strong>API keys required to process documents.</strong>
+                        You need at least one LLM key (OpenAI or Anthropic) and an embedding key to build the knowledge index.
+                    </div>
+                    <button class="api-key-banner-btn" onclick="openSetupWizard()">Configure Keys</button>
+                    <button class="api-key-banner-dismiss" onclick="document.getElementById('apiKeyBanner').classList.add('hidden')" title="Dismiss">&times;</button>
                 </div>
 
                 <div class="upload-zone" id="uploadZone">
@@ -751,6 +789,85 @@
     </div>
 
     </div><!-- /appContainer -->
+
+    <!-- Setup Wizard Modal -->
+    <div class="modal-overlay hidden" id="setupWizardOverlay" onclick="if(event.target===this)closeSetupWizard()">
+        <div class="modal-container setup-wizard-modal">
+            <div class="modal-header">
+                <h3>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-4px;margin-right:8px">
+                        <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
+                    </svg>
+                    API Key Setup
+                </h3>
+                <button class="modal-close" onclick="closeSetupWizard()">&times;</button>
+            </div>
+            <div class="setup-wizard-body">
+            <p class="setup-wizard-intro">GoCognigo uses third-party AI providers for document processing and Q&amp;A. You need at least one <strong>LLM key</strong> and one <strong>Embedding key</strong>.</p>
+
+            <div class="setup-provider-cards">
+                <!-- OpenAI -->
+                <div class="setup-provider-card" id="wizardOpenAICard">
+                    <div class="setup-provider-header">
+                        <span class="setup-provider-name">OpenAI</span>
+                        <span class="setup-provider-tags"><span class="setup-tag setup-tag-llm">LLM</span><span class="setup-tag setup-tag-embed">Embeddings</span></span>
+                    </div>
+                    <p class="setup-provider-desc">Powers GPT-4o for Q&amp;A and text-embedding-3 for document indexing. Recommended for best accuracy.</p>
+                    <a class="setup-get-key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                        Get API key at platform.openai.com
+                    </a>
+                    <div class="setup-key-row">
+                        <input type="password" id="wizardOpenAIKey" class="settings-input" placeholder="sk-..." autocomplete="off">
+                        <button class="key-test-btn" onclick="wizardSaveKey('openai','wizardOpenAIKey',this)">Save</button>
+                    </div>
+                    <div class="setup-key-status" id="wizardOpenAIStatus"></div>
+                </div>
+
+                <!-- Anthropic -->
+                <div class="setup-provider-card" id="wizardAnthropicCard">
+                    <div class="setup-provider-header">
+                        <span class="setup-provider-name">Anthropic</span>
+                        <span class="setup-provider-tags"><span class="setup-tag setup-tag-llm">LLM</span></span>
+                    </div>
+                    <p class="setup-provider-desc">Powers Claude models for nuanced document reasoning. Combine with OpenAI embeddings for full functionality.</p>
+                    <a class="setup-get-key-link" href="https://console.anthropic.com/account/keys" target="_blank" rel="noopener">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                        Get API key at console.anthropic.com
+                    </a>
+                    <div class="setup-key-row">
+                        <input type="password" id="wizardAnthropicKey" class="settings-input" placeholder="sk-ant-..." autocomplete="off">
+                        <button class="key-test-btn" onclick="wizardSaveKey('anthropic','wizardAnthropicKey',this)">Save</button>
+                    </div>
+                    <div class="setup-key-status" id="wizardAnthropicStatus"></div>
+                </div>
+
+                <!-- HuggingFace -->
+                <div class="setup-provider-card" id="wizardHFCard">
+                    <div class="setup-provider-header">
+                        <span class="setup-provider-name">HuggingFace</span>
+                        <span class="setup-provider-tags"><span class="setup-tag setup-tag-llm">LLM</span><span class="setup-tag setup-tag-embed">Embeddings</span></span>
+                    </div>
+                    <p class="setup-provider-desc">Free tier available. Use open-source models for both Q&amp;A and embeddings — great for getting started at no cost.</p>
+                    <a class="setup-get-key-link" href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                        Get API key at huggingface.co/settings/tokens
+                    </a>
+                    <div class="setup-key-row">
+                        <input type="password" id="wizardHFKey" class="settings-input" placeholder="hf_..." autocomplete="off">
+                        <button class="key-test-btn" onclick="wizardSaveKey('huggingface','wizardHFKey',this)">Save</button>
+                    </div>
+                    <div class="setup-key-status" id="wizardHFStatus"></div>
+                </div>
+            </div>
+
+            <div class="setup-wizard-footer">
+                <p class="setup-wizard-note">Keys are encrypted and stored locally on the server. You can update them anytime in Settings.</p>
+                <button class="process-btn" onclick="closeSetupWizard()">Done</button>
+            </div>
+            </div><!-- /setup-wizard-body -->
+        </div>
+    </div>
 
     <!-- Feature Request Modal -->
     <div class="modal-overlay hidden" id="featureRequestOverlay" onclick="if(event.target===this)closeFeatureRequest()">

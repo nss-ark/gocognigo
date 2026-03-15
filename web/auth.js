@@ -105,6 +105,7 @@ function showApp() {
     loadStats();
     loadProviders();
     loadProjects();
+    checkApiKeySetup();
 }
 
 function updateAuthUI() {
@@ -132,8 +133,24 @@ function updateAuthUI() {
     }
 }
 
+function setAuthBtnLoading(btnId, loading) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    const spinner = btn.querySelector('.auth-btn-spinner');
+    if (loading) {
+        btn.classList.add('loading');
+        btn.disabled = true;
+        if (spinner) spinner.classList.remove('hidden');
+    } else {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+        if (spinner) spinner.classList.add('hidden');
+    }
+}
+
 async function signInWithGoogle() {
     if (!firebaseAuth) return;
+    setAuthBtnLoading('googleSignInBtn', true);
     try {
         const provider = new firebase.auth.GoogleAuthProvider();
         await firebaseAuth.signInWithPopup(provider);
@@ -142,6 +159,8 @@ async function signInWithGoogle() {
         if (e.code !== 'auth/popup-closed-by-user') {
             alert('Sign-in failed: ' + e.message);
         }
+    } finally {
+        setAuthBtnLoading('googleSignInBtn', false);
     }
 }
 
@@ -154,6 +173,7 @@ async function signInWithEmail() {
         return;
     }
 
+    setAuthBtnLoading('emailSignInBtn', true);
     try {
         await firebaseAuth.signInWithEmailAndPassword(email, password);
     } catch (e) {
@@ -169,6 +189,8 @@ async function signInWithEmail() {
         } else {
             alert('Sign-in failed: ' + e.message);
         }
+    } finally {
+        setAuthBtnLoading('emailSignInBtn', false);
     }
 }
 

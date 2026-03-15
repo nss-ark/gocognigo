@@ -254,14 +254,18 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Extract token from Authorization header
+		// Extract token from Authorization header or query param (WebSocket can't send headers)
+		token := ""
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		} else if t := r.URL.Query().Get("token"); t != "" {
+			token = t
+		}
+		if token == "" {
 			http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
 			return
 		}
-
-		token := strings.TrimPrefix(authHeader, "Bearer ")
 		claims, err := verifyFirebaseToken(token, projectID)
 		if err != nil {
 			log.Printf("Auth failed: %v", err)
