@@ -23,7 +23,6 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		settings := s.getUserSettings(r)
-		s.mu.RLock()
 		resp := map[string]interface{}{
 			"default_llm":         settings.DefaultLLM,
 			"embed_provider":      settings.EmbedProvider,
@@ -33,10 +32,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"huggingface_key":     maskKey(settings.HuggingFaceKey),
 			"ocr_provider":        settings.OCRProvider,
 			"sarvam_key":          maskKey(settings.SarvamKey),
-			"tesseract_available": s.tesseractOk,
+			"tesseract_available": s.tesseractOk, // immutable after startup
 			"tesseract_lang":      settings.TesseractLang,
 		}
-		s.mu.RUnlock()
 		jsonResp(w, resp)
 
 	case http.MethodPost:

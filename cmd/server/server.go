@@ -315,7 +315,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -358,13 +358,25 @@ func jsonErr(w http.ResponseWriter, msg string, code int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// getProjectStore returns a chat.ProjectStore tied to the current user
+// getProjectStore returns a chat.ProjectStore tied to the current user.
+// Uses read-lock for the common case, upgrading to write-lock only on first access.
 func (s *Server) getProjectStore(r *http.Request) *chat.ProjectStore {
 	uid := getUserUID(r)
 	if uid == "" {
 		uid = "local_dev_user" // Fallback if auth is disabled
 	}
 
+	// Fast path: read-lock check
+	s.mu.RLock()
+	if s.userProjects != nil {
+		if store, ok := s.userProjects[uid]; ok {
+			s.mu.RUnlock()
+			return store
+		}
+	}
+	s.mu.RUnlock()
+
+	// Slow path: write-lock to initialize
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -372,30 +384,44 @@ func (s *Server) getProjectStore(r *http.Request) *chat.ProjectStore {
 		s.userProjects = make(map[string]*chat.ProjectStore)
 	}
 
-	store, ok := s.userProjects[uid]
-	if !ok {
-		// Use a subfolder or distinct file for this user's projects
-		_ = os.MkdirAll("data/users", 0755)
-		storePath := fmt.Sprintf("data/users/%s_projects", uid)
-		sStore, err := chat.NewProjectStore(storePath)
-		if err != nil {
-			log.Printf("Error creating project store for user %s: %v", uid, err)
-			return nil
-		}
-		store = sStore
-		s.userProjects[uid] = store
+	// Double-check after acquiring write lock
+	if store, ok := s.userProjects[uid]; ok {
+		return store
 	}
 
-	return store
+	// Use a subfolder or distinct file for this user's projects
+	_ = os.MkdirAll("data/users", 0755)
+	storePath := fmt.Sprintf("data/users/%s_projects", uid)
+	sStore, err := chat.NewProjectStore(storePath)
+	if err != nil {
+		log.Printf("Error creating project store for user %s: %v", uid, err)
+		return nil
+	}
+	s.userProjects[uid] = sStore
+
+	return sStore
 }
 
-// getUserSettings returns the SavedSettings tied to the current user
+// getUserSettings returns the SavedSettings tied to the current user.
+// Uses read-lock for the common case (settings already loaded), upgrading to
+// write-lock only on first access to avoid serializing all requests.
 func (s *Server) getUserSettings(r *http.Request) *SavedSettings {
 	uid := getUserUID(r)
 	if uid == "" {
 		uid = "local_dev_user"
 	}
 
+	// Fast path: read-lock check
+	s.mu.RLock()
+	if s.userSettings != nil {
+		if settings, ok := s.userSettings[uid]; ok {
+			s.mu.RUnlock()
+			return settings
+		}
+	}
+	s.mu.RUnlock()
+
+	// Slow path: write-lock to initialize
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -403,24 +429,27 @@ func (s *Server) getUserSettings(r *http.Request) *SavedSettings {
 		s.userSettings = make(map[string]*SavedSettings)
 	}
 
-	settings, ok := s.userSettings[uid]
-	if !ok {
-		// Try to load from disk
-		_ = os.MkdirAll("data/users", 0755)
-		path := fmt.Sprintf("data/users/%s_settings.json", uid)
-		loaded, err := loadSettingsFromPath(path)
-		if err == nil {
-			settings = &loaded
-		} else {
-			// default settings
-			settings = &SavedSettings{
-				DefaultLLM:    "claude-3-haiku-20240307",
-				EmbedProvider: "openai",
-				OCRProvider:   "tesseract",
-			}
-		}
-		s.userSettings[uid] = settings
+	// Double-check after acquiring write lock
+	if settings, ok := s.userSettings[uid]; ok {
+		return settings
 	}
+
+	// Try to load from disk
+	_ = os.MkdirAll("data/users", 0755)
+	path := fmt.Sprintf("data/users/%s_settings.json", uid)
+	var settings *SavedSettings
+	loaded, err := loadSettingsFromPath(path)
+	if err == nil {
+		settings = &loaded
+	} else {
+		// default settings
+		settings = &SavedSettings{
+			DefaultLLM:    "claude-3-haiku-20240307",
+			EmbedProvider: "openai",
+			OCRProvider:   "tesseract",
+		}
+	}
+	s.userSettings[uid] = settings
 	return settings
 }
 

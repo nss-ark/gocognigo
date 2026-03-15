@@ -83,7 +83,9 @@ func fetchGoogleCerts() (map[string]*rsa.PublicKey, error) {
 		return googleCerts.certs, nil
 	}
 
-	resp, err := http.Get("https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com")
+	// Use a client with a timeout to prevent indefinite hangs
+	certClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := certClient.Get("https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch Google certs: %w", err)
 	}

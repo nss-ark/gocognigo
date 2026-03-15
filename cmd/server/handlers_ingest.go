@@ -228,6 +228,10 @@ func (s *Server) handleDeleteSingleFile(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Get vectors path before acquiring lock to avoid deadlock
+	// (getProjectStore also acquires s.mu)
+	vectorsPath := s.getProjectStore(r).VectorsPath(req.ProjectID)
+
 	// Remove document chunks from the active index (if loaded for this project)
 	chunksRemoved := 0
 	s.mu.Lock()
@@ -236,7 +240,6 @@ func (s *Server) handleDeleteSingleFile(w http.ResponseWriter, r *http.Request) 
 
 		if chunksRemoved > 0 {
 			// Re-save vectors to disk
-			vectorsPath := s.getProjectStore(r).VectorsPath(req.ProjectID)
 			if err := s.activeIndex.SaveVectors(vectorsPath); err != nil {
 				log.Printf("Warning: failed to re-save vectors after document removal: %v", err)
 			}

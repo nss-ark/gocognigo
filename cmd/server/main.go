@@ -93,8 +93,10 @@ func main() {
 		port = "8080"
 	}
 	httpSrv := &http.Server{
-		Addr:    ":" + port,
-		Handler: corsMiddleware(mux),
+		Addr:              ":" + port,
+		Handler:           corsMiddleware(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Graceful shutdown: listen for SIGINT/SIGTERM
