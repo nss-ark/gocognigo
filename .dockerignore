@@ -1,0 +1,29 @@
+# Environment files — NEVER bake secrets into the Docker image
+.env
+.env.*
+
+# Data directory — user data is mounted at runtime, not baked in
+data/
+
+# Git history — not needed in production image
+.git/
+.gitignore
+
+# Claude AI workspace
+.claude/
+
+# Development tools
+tools/
+
+# Documentation
+*.md
+DEPLOY.md
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Local index artifacts (not needed in image)
+bm25.index/
+vectors.json
+corpus/
