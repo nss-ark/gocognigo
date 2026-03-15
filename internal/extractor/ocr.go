@@ -34,6 +34,10 @@ type OCRConfig struct {
 // or a full path like "C:\Program Files\Tesseract\tesseract.exe".
 var tesseractBin string
 
+// tesseractTessdata holds the resolved path to the tessdata directory
+// (e.g. "/usr/share/tesseract-ocr/5/tessdata"). Set by DetectTesseract().
+var tesseractTessdata string
+
 // DetectTesseract checks whether the tesseract binary is available.
 // It first checks PATH, then probes common Windows install directories.
 func DetectTesseract() bool {
@@ -44,6 +48,7 @@ func DetectTesseract() bool {
 		engPath := filepath.Join(tessdataDir, "eng.traineddata")
 		if _, statErr := os.Stat(engPath); statErr == nil {
 			tesseractBin = path
+			tesseractTessdata = tessdataDir
 			log.Printf("Tesseract found on PATH: %s", path)
 			return true
 		}
@@ -61,6 +66,7 @@ func DetectTesseract() bool {
 			for _, d := range linuxTessdataDirs {
 				if _, statErr := os.Stat(filepath.Join(d, "eng.traineddata")); statErr == nil {
 					tesseractBin = path
+					tesseractTessdata = d
 					log.Printf("Tesseract found on PATH: %s (tessdata: %s)", path, d)
 					return true
 				}
@@ -101,6 +107,7 @@ func DetectTesseract() bool {
 						continue
 					}
 					tesseractBin = c
+					tesseractTessdata = tessdataDir
 					log.Printf("Tesseract found at: %s (tessdata: %s)", c, tessdataDir)
 					return true
 				}
@@ -226,11 +233,12 @@ func tesseractOCR(pdfPath, fileName, lang string) ([]DocumentChunk, error) {
 		return nil, fmt.Errorf("tesseract binary not found")
 	}
 
-	// Resolve tessdata directory — TESSDATA_PREFIX must point directly
-	// to the tessdata/ directory itself (containing eng.traineddata).
-	// Tesseract v5.5 looks for: TESSDATA_PREFIX/eng.traineddata
-	tesseractDir := filepath.Dir(bin)
-	tessDataPrefix := filepath.Join(tesseractDir, "tessdata")
+	// Use the tessdata directory resolved during DetectTesseract().
+	// Falls back to binary's sibling "tessdata/" dir if not set.
+	tessDataPrefix := tesseractTessdata
+	if tessDataPrefix == "" {
+		tessDataPrefix = filepath.Join(filepath.Dir(bin), "tessdata")
+	}
 
 	// Determine page count to decide if batching is needed
 	totalPages, pgErr := pdfPageCount(pdfPath)
