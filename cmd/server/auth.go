@@ -30,17 +30,17 @@ type FirebaseConfig struct {
 }
 
 func getFirebaseConfig() *FirebaseConfig {
-	projectID := os.Getenv("FIREBASE_PROJECT_ID")
+	projectID := strings.TrimSpace(os.Getenv("FIREBASE_PROJECT_ID"))
 	if projectID == "" {
 		return nil // Auth not configured
 	}
 	return &FirebaseConfig{
-		APIKey:            os.Getenv("FIREBASE_API_KEY"),
-		AuthDomain:        os.Getenv("FIREBASE_AUTH_DOMAIN"),
+		APIKey:            strings.TrimSpace(os.Getenv("FIREBASE_API_KEY")),
+		AuthDomain:        strings.TrimSpace(os.Getenv("FIREBASE_AUTH_DOMAIN")),
 		ProjectID:         projectID,
-		StorageBucket:     os.Getenv("FIREBASE_STORAGE_BUCKET"),
-		MessagingSenderID: os.Getenv("FIREBASE_MESSAGING_SENDER_ID"),
-		AppID:             os.Getenv("FIREBASE_APP_ID"),
+		StorageBucket:     strings.TrimSpace(os.Getenv("FIREBASE_STORAGE_BUCKET")),
+		MessagingSenderID: strings.TrimSpace(os.Getenv("FIREBASE_MESSAGING_SENDER_ID")),
+		AppID:             strings.TrimSpace(os.Getenv("FIREBASE_APP_ID")),
 	}
 }
 
@@ -236,7 +236,7 @@ const userEmailKey contextKey = "userEmail"
 // authMiddleware checks for a valid Firebase ID token on API requests.
 // If FIREBASE_PROJECT_ID is not set, auth is disabled (local dev mode).
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	projectID := os.Getenv("FIREBASE_PROJECT_ID")
+	projectID := strings.TrimSpace(os.Getenv("FIREBASE_PROJECT_ID"))
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth if not configured (local dev mode)
