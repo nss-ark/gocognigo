@@ -33,18 +33,62 @@ async function startIngestion() {
 
 let ingestStatusWs = null;
 
-function startIngestPolling() {
-    if (ingestPollInterval) {
-        clearInterval(ingestPollInterval);
-        ingestPollInterval = null;
+function handleIngestStatus(status) {
+    updateIngestUI(status);
+
+    if (status.phase === 'done') {
+        stopIngestPolling();
+        refreshProjects().then(() => { renderSidebar(); loadStats(); });
+        showIngestResults(status);
+    } else if (status.phase === 'error') {
+        stopIngestPolling();
+        if (status.can_retry) {
+            showRetryUI(status.error || 'Embedding failed');
+        } else {
+            alert('Processing failed: ' + (status.error || 'Unknown error'));
+            showPhase('upload');
+        }
+    } else if (status.phase === 'cancelled') {
+        stopIngestPolling();
+        showPhase('upload');
+    } else if (status.phase === 'idle') {
+        stopIngestPolling();
+        alert('Processing stopped unexpectedly. Please try again.');
+        showPhase('upload');
     }
+}
+
+function stopIngestPolling() {
     if (ingestStatusWs) {
         ingestStatusWs.close();
         ingestStatusWs = null;
     }
+    if (ingestPollInterval) {
+        clearInterval(ingestPollInterval);
+        ingestPollInterval = null;
+    }
+}
+
+function startHttpPolling() {
+    console.log('Falling back to HTTP polling for ingest status');
+    ingestPollInterval = setInterval(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/ingest/status`);
+            if (!res.ok) return;
+            const status = await res.json();
+            handleIngestStatus(status);
+        } catch (e) {
+            // ignore transient fetch errors
+        }
+    }, 1000);
+}
+
+function startIngestPolling() {
+    stopIngestPolling();
 
     updateIngestUI({ phase: 'processing', files_done: 0, files_total: 0, chunks_done: 0, chunks_total: 0 });
 
+    // Try WebSocket first, fall back to HTTP polling
     let wsUrl;
     if (API_BASE && API_BASE.startsWith('http')) {
         wsUrl = API_BASE.replace(/^http/, 'ws') + '/api/ingest/ws';
@@ -55,55 +99,48 @@ function startIngestPolling() {
     if (authIdToken) {
         wsUrl += '?token=' + encodeURIComponent(authIdToken);
     }
+
+    // Set a timeout — if WS doesn't open within 3s, fall back to HTTP
+    let wsConnected = false;
+    const wsFallbackTimer = setTimeout(() => {
+        if (!wsConnected && ingestStatusWs) {
+            console.warn('WebSocket did not connect in time, switching to HTTP polling');
+            ingestStatusWs.close();
+            ingestStatusWs = null;
+            startHttpPolling();
+        }
+    }, 3000);
+
     ingestStatusWs = new WebSocket(wsUrl);
 
-    ingestStatusWs.onmessage = async (e) => {
+    ingestStatusWs.onopen = () => {
+        wsConnected = true;
+        clearTimeout(wsFallbackTimer);
+    };
+
+    ingestStatusWs.onmessage = (e) => {
         try {
-            const status = JSON.parse(e.data);
-            updateIngestUI(status);
-
-            if (status.phase === 'done') {
-                ingestStatusWs.close();
-                ingestStatusWs = null;
-
-                // Refresh projects
-                await refreshProjects();
-                renderSidebar();
-                loadStats();
-
-                showIngestResults(status);
-            } else if (status.phase === 'error') {
-                ingestStatusWs.close();
-                ingestStatusWs = null;
-
-                if (status.can_retry) {
-                    showRetryUI(status.error || 'Embedding failed');
-                } else {
-                    alert('Processing failed: ' + (status.error || 'Unknown error'));
-                    showPhase('upload');
-                }
-            } else if (status.phase === 'cancelled') {
-                ingestStatusWs.close();
-                ingestStatusWs = null;
-                showPhase('upload');
-            } else if (status.phase === 'idle') {
-                ingestStatusWs.close();
-                ingestStatusWs = null;
-                alert('Processing stopped unexpectedly. Please try again.');
-                showPhase('upload');
-            }
+            handleIngestStatus(JSON.parse(e.data));
         } catch (err) {
             console.error('WS message error:', err);
         }
     };
 
-    ingestStatusWs.onerror = (e) => {
-        console.error('WebSocket error:', e);
+    ingestStatusWs.onerror = () => {
+        // WS failed — fall back to HTTP polling if not already
+        if (!wsConnected) {
+            clearTimeout(wsFallbackTimer);
+            ingestStatusWs = null;
+            startHttpPolling();
+        }
     };
 
     ingestStatusWs.onclose = () => {
         ingestStatusWs = null;
-        // Optionally handle unexpected closure here
+        // If WS closes unexpectedly during active processing, fall back to HTTP
+        if (wsConnected && !ingestPollInterval) {
+            startHttpPolling();
+        }
     };
 }
 
@@ -166,15 +203,8 @@ async function cancelIngestion() {
     btn.disabled = true;
     btn.textContent = 'Cancelling...';
 
-    // Always close WebSocket immediately so we don't receive stale status updates
-    if (ingestStatusWs) {
-        ingestStatusWs.close();
-        ingestStatusWs = null;
-    }
-    if (ingestPollInterval) {
-        clearInterval(ingestPollInterval);
-        ingestPollInterval = null;
-    }
+    // Stop all polling immediately so we don't receive stale status updates
+    stopIngestPolling();
 
     try {
         await fetch(`${API_BASE}/api/ingest/cancel`, {
